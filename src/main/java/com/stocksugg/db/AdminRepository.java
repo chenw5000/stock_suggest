@@ -37,6 +37,11 @@ public final class AdminRepository {
             WHERE "key" = ?
             """;
 
+    private static final String DELETE_BY_KEY = """
+            DELETE FROM admin
+            WHERE "key" = ?
+            """;
+
     private static final String NEXT_ID = """
             SELECT COALESCE(MAX(id), 0) + 1 FROM admin
             """;
@@ -103,6 +108,19 @@ public final class AdminRepository {
             }
         }
         return findByKey(normalizedKey).orElseThrow();
+    }
+
+    /**
+     * Deletes a property by key. Returns {@code true} if a row was removed.
+     */
+    public boolean deleteByKey(String key) throws SQLException {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("key is required");
+        }
+        try (PreparedStatement ps = connection.prepareStatement(DELETE_BY_KEY)) {
+            ps.setString(1, key.trim());
+            return ps.executeUpdate() > 0;
+        }
     }
 
     private int nextId() throws SQLException {

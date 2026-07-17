@@ -116,7 +116,41 @@ public class App {
         }
     }
 
-    private static void runBatchJob() {
+    private static final Object BATCH_LOCK = new Object();
+    private static volatile boolean batchRunning;
+
+    /** True while a batch (Yahoo refresh + Gemini) is in progress. */
+    public static boolean isBatchRunning() {
+        return batchRunning;
+    }
+
+    /**
+     * Starts {@link #runBatchJob()} on a background thread if none is already running.
+     *
+     * @return {@code true} if the job was started, {@code false} if one was already running
+     */
+    public static boolean startBatchJobAsync() {
+        synchronized (BATCH_LOCK) {
+            if (batchRunning) {
+                return false;
+            }
+            batchRunning = true;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                runBatchJob();
+            } finally {
+                synchronized (BATCH_LOCK) {
+                    batchRunning = false;
+                }
+            }
+        }, "stocksugg-batch");
+        worker.setDaemon(true);
+        worker.start();
+        return true;
+    }
+
+    public static void runBatchJob() {
         List<String> tickers = TickerList.loadFromAdmin();
         System.out.println("Using tickers from admin." + TickerList.ADMIN_KEY + ": " + tickers);
         for (String ticker : tickers) {

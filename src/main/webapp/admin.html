@@ -13,38 +13,40 @@
         <h1>Admin properties</h1>
         <p class="meta" id="meta">Loading…</p>
       </div>
+      <div class="admin-batch">
+        <button type="button" id="run-batch">Run batch job</button>
+        <p class="status" id="batch-status" hidden></p>
+      </div>
     </header>
 
+    <p class="error" id="error" hidden></p>
+    <p class="status" id="status" hidden></p>
+    <div class="table-wrap" id="table-wrap">
+      <p class="empty" id="empty" hidden>No admin properties yet.</p>
+      <table id="admin-table" hidden>
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Value</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="admin-body"></tbody>
+      </table>
+    </div>
+
     <section class="admin-form-panel">
-      <h2 class="section-title">Create / update</h2>
+      <h2 class="section-title">Add property</h2>
       <form id="admin-form" class="admin-form">
         <label for="key">Key</label>
         <input id="key" name="key" type="text" required maxlength="100" autocomplete="off" spellcheck="false">
         <label for="value">Value</label>
         <input id="value" name="value" type="text" maxlength="155" autocomplete="off">
         <div class="admin-form-actions">
-          <button type="submit">Save</button>
-          <button type="button" id="clear-form">Clear</button>
+          <button type="submit">Add</button>
         </div>
       </form>
-      <p class="status" id="status" hidden></p>
     </section>
-
-    <p class="error" id="error" hidden></p>
-    <div class="table-wrap" id="table-wrap">
-      <p class="empty" id="empty" hidden>No admin properties yet.</p>
-      <table id="admin-table" hidden>
-        <thead>
-          <tr>
-            <th>id</th>
-            <th>key</th>
-            <th>value</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="admin-body"></tbody>
-      </table>
-    </div>
 
     <p class="meta">
       <a href="index.html">← Home</a>

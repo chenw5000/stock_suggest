@@ -266,7 +266,7 @@ a.ticker-link:hover {
 }
 
 .admin-form-panel {
-  margin-bottom: 1.5rem;
+  margin: 1.5rem 0;
   padding: 1rem 1.1rem;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -293,7 +293,8 @@ a.ticker-link:hover {
   font-weight: 600;
 }
 
-.admin-form input[type="text"] {
+.admin-form input[type="text"],
+.admin-value-input {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
@@ -310,8 +311,17 @@ a.ticker-link:hover {
   gap: 0.5rem;
 }
 
+.admin-batch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.admin-batch button,
 .admin-form-actions button,
-.edit-btn {
+.update-btn,
+.delete-btn {
   background: #1e3a4f;
   color: var(--accent);
   border: 1px solid #2f5670;
@@ -322,9 +332,43 @@ a.ticker-link:hover {
   cursor: pointer;
 }
 
+.admin-batch button:hover,
 .admin-form-actions button:hover,
-.edit-btn:hover {
+.update-btn:hover {
   background: #25485f;
+}
+
+.admin-batch button:disabled,
+.update-btn:disabled,
+.delete-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.delete-btn {
+  background: color-mix(in srgb, var(--sell) 25%, var(--panel));
+  color: #ffb4b4;
+  border-color: color-mix(in srgb, var(--sell) 55%, var(--line));
+}
+
+.delete-btn:hover {
+  background: color-mix(in srgb, var(--sell) 40%, var(--panel));
+}
+
+.admin-actions {
+  white-space: nowrap;
+  display: flex;
+  gap: 0.4rem;
+}
+
+td.admin-key {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+td.admin-value-cell {
+  min-width: 16rem;
+  width: 55%;
 }
 
 .status {
@@ -333,12 +377,12 @@ a.ticker-link:hover {
   font-size: 0.9rem;
 }
 
-.status.error-text {
-  color: #ffb4b4;
+.admin-batch .status {
+  margin: 0;
+  text-align: right;
+  max-width: 22rem;
 }
 
-td.admin-value {
-  text-align: left;
-  white-space: normal;
-  max-width: 28rem;
+.status.error-text {
+  color: #ffb4b4;
 }

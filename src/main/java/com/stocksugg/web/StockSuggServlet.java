@@ -1,11 +1,14 @@
 package com.stocksugg.web;
 
+import com.stocksugg.App;
+
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -21,6 +24,7 @@ import java.util.stream.Collectors;
         "/api/history/*",
         "/api/admin",
         "/api/admin/*",
+        "/api/batch",
         "/suggest/*"
 })
 public final class StockSuggServlet extends HttpServlet {
@@ -52,6 +56,11 @@ public final class StockSuggServlet extends HttpServlet {
             return;
         }
 
+        if ("/api/batch".equals(path)) {
+            writeBatchStatus(resp);
+            return;
+        }
+
         if ("/suggest".equals(path)) {
             redirectToSuggestPage(req, resp);
         }
@@ -68,7 +77,25 @@ public final class StockSuggServlet extends HttpServlet {
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        doPut(req, resp);
+        String path = req.getServletPath();
+        if ("/api/batch".equals(path)) {
+            writeBatchStart(resp);
+            return;
+        }
+        if ("/api/admin".equals(path)) {
+            writeAdminUpsert(req, resp);
+            return;
+        }
+        resp.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+    }
+
+    @Override
+    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        if ("/api/admin".equals(req.getServletPath())) {
+            writeAdminDelete(req, resp);
+            return;
+        }
+        resp.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
     }
 
     private static void writeAdminList(HttpServletResponse resp) throws IOException {
@@ -94,6 +121,56 @@ public final class StockSuggServlet extends HttpServlet {
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Failed to save admin property: " + e.getMessage()));
+        }
+    }
+
+    private static void writeAdminDelete(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String key = extractPathSegment(req.getPathInfo());
+        if (key == null) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
+                    "error", "Missing key. Use DELETE /api/admin/{key}."));
+            return;
+        }
+        try {
+            String decoded = URLDecoder.decode(key, StandardCharsets.UTF_8);
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(AdminApi.deleteJson(decoded));
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to delete admin property: " + e.getMessage()));
+        }
+    }
+
+    private static void writeBatchStart(HttpServletResponse resp) throws IOException {
+        try {
+            boolean started = App.startBatchJobAsync();
+            Map<String, Object> body = Map.of(
+                    "started", started,
+                    "running", App.isBatchRunning(),
+                    "message", started
+                            ? "Batch job started (Yahoo refresh + Gemini suggestions)."
+                            : "Batch job is already running.");
+            writeJson(resp,
+                    started ? HttpServletResponse.SC_ACCEPTED : HttpServletResponse.SC_CONFLICT,
+                    body);
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to start batch job: " + e.getMessage()));
+        }
+    }
+
+    private static void writeBatchStatus(HttpServletResponse resp) throws IOException {
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(BatchApi.statusJson());
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to read batch status: " + e.getMessage()));
         }
     }
 

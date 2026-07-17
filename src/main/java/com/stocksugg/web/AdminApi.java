@@ -41,4 +41,21 @@ public final class AdminApi {
             return SuggestApi.mapper().writeValueAsString(body);
         }
     }
+
+    public static String deleteJson(String key) throws Exception {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("key is required");
+        }
+        try (Database db = new Database()) {
+            AdminRepository repository = new AdminRepository(db);
+            boolean deleted = repository.deleteByKey(key);
+            if (!deleted) {
+                throw new IllegalArgumentException("No admin property with key '" + key.trim() + "'");
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("deleted", true);
+            body.put("key", key.trim());
+            return SuggestApi.mapper().writeValueAsString(body);
+        }
+    }
 }

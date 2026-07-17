@@ -1,5 +1,6 @@
 package com.stocksugg.web;
 
+import com.stocksugg.App;
 import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
 import io.javalin.http.staticfiles.Location;
@@ -98,6 +99,42 @@ public final class WebServer {
                 } catch (Exception e) {
                     ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .json(Map.of("error", "Failed to save admin property: " + e.getMessage()));
+                }
+            });
+
+            config.routes.delete("/api/admin/{key}", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(AdminApi.deleteJson(ctx.pathParam("key")));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Failed to delete admin property: " + e.getMessage()));
+                }
+            });
+
+            config.routes.post("/api/batch", ctx -> {
+                try {
+                    boolean started = App.startBatchJobAsync();
+                    ctx.status(started ? HttpStatus.ACCEPTED : HttpStatus.CONFLICT)
+                            .json(Map.of(
+                                    "started", started,
+                                    "running", App.isBatchRunning(),
+                                    "message", started
+                                            ? "Batch job started (Yahoo refresh + Gemini suggestions)."
+                                            : "Batch job is already running."));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Failed to start batch job: " + e.getMessage()));
+                }
+            });
+
+            config.routes.get("/api/batch", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(BatchApi.statusJson());
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Failed to read batch status: " + e.getMessage()));
                 }
             });
 
