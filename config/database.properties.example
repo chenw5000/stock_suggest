@@ -1,0 +1,13 @@
+# Copy this file to database.properties (same folder) and fill in secrets.
+# That local file is gitignored — do not commit real passwords.
+#
+#   copy config\database.properties.example config\database.properties
+#
+# Or set environment variables / JVM -D flags instead:
+#   STOCKSUGG_JDBC_URL, STOCKSUGG_DB_USER, STOCKSUGG_DB_PASSWORD
+#
+# Optional: STOCKSUGG_CONFIG=C:\path\to\custom.properties
+
+STOCKSUGG_JDBC_URL=jdbc:postgresql://localhost:5432/stocksugg?socketTimeout=60000&connectTimeout=15000
+STOCKSUGG_DB_USER=gcadmin
+STOCKSUGG_DB_PASSWORD=change-me

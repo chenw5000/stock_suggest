@@ -47,10 +47,33 @@ public final class StockSummaryBuilder {
             }
             stocks.add(buildPackage(bars, horizonTradingDays));
         }
+        return wrapStocks(stocks, horizonTradingDays);
+    }
+
+    /**
+     * Multi-snapshot package: each list of bars is one decision package (same ticker may repeat
+     * with different asOf dates for historical backfill).
+     */
+    public static Map<String, Object> buildMultiSnapshotPackage(
+            List<List<StockRow>> snapshotsOldestFirst,
+            int horizonTradingDays) {
+        if (snapshotsOldestFirst == null || snapshotsOldestFirst.isEmpty()) {
+            throw new IllegalArgumentException("Need at least one snapshot package.");
+        }
+        List<Map<String, Object>> stocks = new ArrayList<>();
+        for (List<StockRow> bars : snapshotsOldestFirst) {
+            if (bars == null || bars.isEmpty()) {
+                continue;
+            }
+            stocks.add(buildPackage(bars, horizonTradingDays));
+        }
+        return wrapStocks(stocks, horizonTradingDays);
+    }
+
+    private static Map<String, Object> wrapStocks(List<Map<String, Object>> stocks, int horizonTradingDays) {
         if (stocks.isEmpty()) {
             throw new IllegalArgumentException("All ticker bar lists were empty.");
         }
-
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("horizonTradingDays", horizonTradingDays);
         payload.put("riskTolerance", "moderate");

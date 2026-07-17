@@ -80,6 +80,41 @@ public class App {
         }
     }
 
+    /**
+     * For trading days in [{@code from}, {@code to}] that already have a DB row for the ticker,
+     * ask Gemini in batched API calls (multiple asOf packages per request) and update those rows.
+     */
+    private static void backfillSuggestions(String ticker, LocalDate from, LocalDate to) {
+        String symbol = ticker.toUpperCase();
+        System.out.println("Backfilling Gemini suggestions for " + symbol
+                + " from " + from + " to " + to + " ...");
+        try (Database db = new Database();
+             GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.1-flash-lite"))) {
+            StockRepository repository = new StockRepository(db);
+            GeminiStockAdvisor advisor = new GeminiStockAdvisor(repository, gemini);
+            List<LocalDate> dates = repository.findDatesInRange(symbol, from, to);
+            if (dates.isEmpty()) {
+                System.out.println("No stored trading days for " + symbol
+                        + " in " + from + " .. " + to + ". Import Yahoo data first.");
+                return;
+            }
+
+            System.out.println("Found " + dates.size() + " trading day(s); sending in Gemini batches of "
+                    + GeminiStockAdvisor.DEFAULT_HISTORICAL_CHUNK_SIZE + " ...");
+            List<GeminiSuggestion> suggestions = advisor.adviseAsOfMany(symbol, dates);
+            for (GeminiSuggestion suggestion : suggestions) {
+                GeminiStockAdvisor.printSuggestion(suggestion);
+                System.out.println("Suggestion saved for " + suggestion.ticker()
+                        + " on " + suggestion.asOf());
+            }
+            System.out.println("Backfill complete for " + symbol
+                    + ": " + suggestions.size() + " saved of " + dates.size() + " trading day(s).");
+        } catch (Exception e) {
+            System.err.println("Backfill failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     private static void runBatchJob() {
         List<String> tickers = List.of(
                 "AAPL", "TSLA", "MSFT", "NVDA", "GOOGL", "MU", "SOXX", "ARKG", "ARKK", "NOK");
@@ -89,12 +124,31 @@ public class App {
         adviseStocks(tickers);
     }
 
+    private static String argValue(List<String> args, String name, String defaultValue) {
+        String prefix = name + "=";
+        for (String arg : args) {
+            if (arg.startsWith(prefix)) {
+                String value = arg.substring(prefix.length()).trim();
+                return value.isEmpty() ? defaultValue : value;
+            }
+        }
+        return defaultValue;
+    }
+
     public static void main(String[] args) {
         System.out.println("StockSugg starting...");
 
         List<String> argList = Arrays.asList(args);
         boolean runBatch = argList.contains("--batch");
         boolean embedded = argList.contains("--embedded");
+        boolean backfill = argList.contains("--backfill");
+
+        if (backfill) {
+            String ticker = argValue(argList, "--ticker", "AAPL");
+            LocalDate from = LocalDate.parse(argValue(argList, "--from", "2026-07-01"));
+            LocalDate to = LocalDate.parse(argValue(argList, "--to", "2026-07-14"));
+            backfillSuggestions(ticker, from, to);
+        }
 
         if (runBatch) {
             runBatchJob();
@@ -107,9 +161,11 @@ public class App {
             return;
         }
 
-        if (!runBatch) {
+        if (!runBatch && !backfill) {
             System.out.println("Nothing to run. Options:");
             System.out.println("  --batch              refresh Yahoo data + Gemini suggestions");
+            System.out.println("  --backfill           Gemini backfill for historical days");
+            System.out.println("      --ticker=AAPL --from=2026-07-01 --to=2026-07-14");
             System.out.println("  --embedded           start embedded Javalin on port 7070 (dev)");
             System.out.println("  --batch --embedded   batch then start embedded server");
             System.out.println("For Tomcat: mvn -DskipTests package  then copy target/stocksugg.war");

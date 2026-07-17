@@ -12,23 +12,29 @@ import com.stocksugg.gemini.GeminiService;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Loads recent bars from the database, asks Gemini for structured suggestion(s), prints and persists them.
  */
 public final class GeminiStockAdvisor {
 
+    /** Max historical as-of packages per Gemini call (keeps prompt size manageable). */
+    public static final int DEFAULT_HISTORICAL_CHUNK_SIZE = 8;
+
     public static final String SYSTEM_INSTRUCTION = """
             Use only provided OHLCV/indicators. No invented quotes. Return JSON schema.
-            If data is insufficient for a ticker, action=AVOID and explain for that ticker.
+            If data is insufficient for a package, action=AVOID and explain for that package.
             Price ranges must be grounded in the supplied prices/levels (entryPriceRange,
             cutlossPriceRange, profitTakingPriceRange). confidence is 0.0-1.0.
-            When multiple stocks are provided, return one suggestion object per ticker in
-            the suggestions array. Keep each suggestion independent — do not mix tickers.
+            When multiple stock packages are provided, return exactly one suggestion object
+            per package in the suggestions array. Each package has ticker + asOf — copy that
+            asOf into the suggestion, keep packages independent, and do not use later data.
             """;
 
     private final StockRepository repository;
@@ -60,8 +66,7 @@ public final class GeminiStockAdvisor {
             throw new IllegalArgumentException("At least one ticker is required.");
         }
 
-        Map<String, List<StockRow>> barsByTicker = new LinkedHashMap<>();
-        Map<String, LocalDate> latestDateByTicker = new LinkedHashMap<>();
+        List<AdviceSnapshot> snapshots = new ArrayList<>();
         for (String raw : tickers) {
             String ticker = raw.trim().toUpperCase(Locale.ROOT);
             List<StockRow> bars = repository.findRecentBars(ticker, lookbackBars);
@@ -69,16 +74,109 @@ public final class GeminiStockAdvisor {
                 System.out.println("Skipping " + ticker + ": no rows in database.");
                 continue;
             }
-            barsByTicker.put(ticker, bars);
-            latestDateByTicker.put(ticker, bars.getLast().date());
+            snapshots.add(new AdviceSnapshot(ticker, bars.getLast().date(), bars));
         }
-        if (barsByTicker.isEmpty()) {
+        if (snapshots.isEmpty()) {
             throw new IllegalStateException("No stock rows found for any requested ticker.");
         }
 
-        Map<String, Object> payload = StockSummaryBuilder.buildMultiPackage(barsByTicker, horizonTradingDays);
+        return requestAndPersist(snapshots, horizonTradingDays);
+    }
+
+    /**
+     * Asks Gemini for a suggestion as of a historical trading day and updates that row.
+     * Uses lookback bars ending on {@code asOf} (must already exist in the database).
+     */
+    public GeminiSuggestion adviseAsOf(String ticker, LocalDate asOf) throws Exception {
+        List<GeminiSuggestion> results = adviseAsOfMany(ticker, List.of(asOf));
+        if (results.isEmpty()) {
+            throw new IllegalStateException("Gemini returned no suggestion for " + ticker + " on " + asOf);
+        }
+        return results.getFirst();
+    }
+
+    /**
+     * Batch historical advice: one Gemini API call per chunk of as-of dates for the same ticker.
+     */
+    public List<GeminiSuggestion> adviseAsOfMany(String ticker, List<LocalDate> asOfDates)
+            throws Exception {
+        return adviseAsOfMany(
+                ticker,
+                asOfDates,
+                StockSummaryBuilder.DEFAULT_LOOKBACK_BARS,
+                StockSummaryBuilder.DEFAULT_HORIZON_DAYS,
+                DEFAULT_HISTORICAL_CHUNK_SIZE);
+    }
+
+    public List<GeminiSuggestion> adviseAsOfMany(
+            String ticker,
+            List<LocalDate> asOfDates,
+            int lookbackBars,
+            int horizonTradingDays,
+            int chunkSize) throws Exception {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("ticker is required.");
+        }
+        if (asOfDates == null || asOfDates.isEmpty()) {
+            throw new IllegalArgumentException("at least one asOf date is required.");
+        }
+        if (chunkSize < 1) {
+            throw new IllegalArgumentException("chunkSize must be >= 1");
+        }
+
+        String symbol = ticker.trim().toUpperCase(Locale.ROOT);
+        List<AdviceSnapshot> snapshots = new ArrayList<>();
+        for (LocalDate asOf : asOfDates) {
+            if (asOf == null) {
+                continue;
+            }
+            List<StockRow> bars = repository.findBarsEndingOn(symbol, asOf, lookbackBars);
+            if (bars.isEmpty()) {
+                System.out.println("Skipping " + symbol + " on " + asOf + ": no bars.");
+                continue;
+            }
+            LocalDate lastBarDate = bars.getLast().date();
+            if (!lastBarDate.equals(asOf)) {
+                System.out.println("Skipping " + symbol + " on " + asOf
+                        + ": no row that day (latest on/before is " + lastBarDate + ")");
+                continue;
+            }
+            snapshots.add(new AdviceSnapshot(symbol, asOf, bars));
+        }
+        if (snapshots.isEmpty()) {
+            throw new IllegalStateException("No usable snapshots for " + symbol);
+        }
+
+        List<GeminiSuggestion> all = new ArrayList<>();
+        for (int i = 0; i < snapshots.size(); i += chunkSize) {
+            List<AdviceSnapshot> chunk = snapshots.subList(i, Math.min(i + chunkSize, snapshots.size()));
+            System.out.println("Gemini historical batch for " + symbol
+                    + ": " + chunk.size() + " day(s) ("
+                    + chunk.getFirst().asOf() + " .. " + chunk.getLast().asOf() + ")");
+            all.addAll(requestAndPersist(chunk, horizonTradingDays));
+        }
+        return all;
+    }
+
+    private List<GeminiSuggestion> requestAndPersist(
+            List<AdviceSnapshot> snapshots,
+            int horizonTradingDays) throws Exception {
+        List<List<StockRow>> barLists = snapshots.stream().map(AdviceSnapshot::bars).toList();
+        Map<String, Object> payload =
+                StockSummaryBuilder.buildMultiSnapshotPackage(barLists, horizonTradingDays);
+
+        Set<String> expectedKeys = new HashSet<>();
+        Map<String, LocalDate> expectedAsOf = new LinkedHashMap<>();
+        for (AdviceSnapshot snapshot : snapshots) {
+            String key = snapshotKey(snapshot.ticker(), snapshot.asOf());
+            expectedKeys.add(key);
+            expectedAsOf.put(key, snapshot.asOf());
+        }
+
         String userPrompt = """
-                Analyze this multi-stock market package and return one suggestion per ticker.
+                Analyze this multi-stock market package and return one suggestion per stock package.
+                Each package has its own ticker and asOf date — treat that asOf as the decision date
+                (do not use later information), and return the same asOf in each suggestion.
                 Package:
                 %s
                 """.formatted(objectMapper.writeValueAsString(payload));
@@ -97,25 +195,57 @@ public final class GeminiStockAdvisor {
         }
 
         List<GeminiSuggestion> persisted = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
         for (GeminiSuggestion suggestion : batch.suggestions()) {
             String ticker = suggestion.ticker() == null
                     ? null
                     : suggestion.ticker().trim().toUpperCase(Locale.ROOT);
-            if (ticker == null || !latestDateByTicker.containsKey(ticker)) {
-                System.out.println("Skipping unexpected suggestion ticker: " + suggestion.ticker());
+            if (ticker == null) {
+                System.out.println("Skipping suggestion with missing ticker.");
                 continue;
             }
-            LocalDate asOf = resolveAsOf(suggestion, latestDateByTicker.get(ticker));
-            int updated = repository.updateSuggestion(ticker, asOf, suggestion.toDbUpdate());
-            if (updated == 0) {
-                asOf = latestDateByTicker.get(ticker);
-                updated = repository.updateSuggestion(ticker, asOf, suggestion.toDbUpdate());
+
+            LocalDate asOf;
+            try {
+                asOf = resolveAsOf(suggestion, null);
+            } catch (Exception e) {
+                System.out.println("Skipping suggestion with invalid asOf for " + ticker + ": "
+                        + suggestion.asOf());
+                continue;
             }
+            if (asOf == null) {
+                // Single-snapshot fallback only.
+                if (snapshots.size() == 1 && snapshots.getFirst().ticker().equals(ticker)) {
+                    asOf = snapshots.getFirst().asOf();
+                } else {
+                    System.out.println("Skipping " + ticker + ": missing asOf in multi-package response.");
+                    continue;
+                }
+            }
+
+            String key = snapshotKey(ticker, asOf);
+            if (!expectedKeys.contains(key)) {
+                System.out.println("Skipping unexpected suggestion: " + ticker + " / " + asOf);
+                continue;
+            }
+            if (!seen.add(key)) {
+                System.out.println("Skipping duplicate suggestion: " + ticker + " / " + asOf);
+                continue;
+            }
+
+            int updated = repository.updateSuggestion(ticker, asOf, suggestion.toDbUpdate());
             if (updated == 0) {
                 throw new IllegalStateException(
                         "Failed to update suggestion for " + ticker + " on " + asOf);
             }
             persisted.add(suggestion);
+        }
+
+        Set<String> missing = new HashSet<>(expectedKeys);
+        missing.removeAll(seen);
+        if (!missing.isEmpty()) {
+            System.out.println("Gemini omitted " + missing.size()
+                    + " package(s) in this batch: " + missing);
         }
         return persisted;
     }
@@ -148,6 +278,12 @@ public final class GeminiStockAdvisor {
         }
         return LocalDate.parse(suggestion.asOf());
     }
+
+    private static String snapshotKey(String ticker, LocalDate asOf) {
+        return ticker + "|" + asOf;
+    }
+
+    private record AdviceSnapshot(String ticker, LocalDate asOf, List<StockRow> bars) {}
 
     private static Schema batchSuggestionSchema() {
         return Schema.builder()

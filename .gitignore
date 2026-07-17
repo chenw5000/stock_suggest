@@ -24,6 +24,8 @@ Thumbs.db
 # Secrets
 .env
 *.pem
+config/database.properties
+database.properties
 
 # Local database files
 data/

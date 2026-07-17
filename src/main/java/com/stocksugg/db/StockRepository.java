@@ -43,6 +43,22 @@ public final class StockRepository {
             LIMIT ?
             """;
 
+    private static final String SELECT_BARS_ENDING_ON = """
+            SELECT ticker, "date", open, high, low, close,
+                   ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF
+            FROM stock
+            WHERE ticker = ? AND "date" <= ?
+            ORDER BY "date" DESC
+            LIMIT ?
+            """;
+
+    private static final String SELECT_DATES_IN_RANGE = """
+            SELECT "date"
+            FROM stock
+            WHERE ticker = ? AND "date" >= ? AND "date" <= ?
+            ORDER BY "date"
+            """;
+
     private static final String SELECT_BY_DATE = """
             SELECT id, ticker, "date", open, high, low, close,
                    ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF,
@@ -178,25 +194,67 @@ public final class StockRepository {
             ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    newestFirst.add(new StockRow(
-                            rs.getString("ticker"),
-                            LocalDate.parse(rs.getString("date")),
-                            getFloat(rs, "open"),
-                            getFloat(rs, "high"),
-                            getFloat(rs, "low"),
-                            getFloat(rs, "close"),
-                            getFloat(rs, "ma5"),
-                            getFloat(rs, "ma10"),
-                            getFloat(rs, "ma20"),
-                            getFloat(rs, "ma50"),
-                            getFloat(rs, "ma200"),
-                            getFloat(rs, "chandeMmt"),
-                            getFloat(rs, "chalkinMF")));
+                    newestFirst.add(readStockRow(rs));
                 }
             }
         }
         Collections.reverse(newestFirst);
         return newestFirst;
+    }
+
+    /**
+     * Up to {@code limit} bars for ticker with {@code "date" <= asOf}, returned oldest → newest.
+     * The last bar is the row on {@code asOf} when that trading day exists.
+     */
+    public List<StockRow> findBarsEndingOn(String ticker, LocalDate asOf, int limit)
+            throws SQLException {
+        List<StockRow> newestFirst = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_BARS_ENDING_ON)) {
+            ps.setString(1, ticker.toUpperCase());
+            ps.setString(2, asOf.toString());
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    newestFirst.add(readStockRow(rs));
+                }
+            }
+        }
+        Collections.reverse(newestFirst);
+        return newestFirst;
+    }
+
+    /** Trading dates stored for ticker in [{@code from}, {@code to}], ascending. */
+    public List<LocalDate> findDatesInRange(String ticker, LocalDate from, LocalDate to)
+            throws SQLException {
+        List<LocalDate> dates = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_DATES_IN_RANGE)) {
+            ps.setString(1, ticker.toUpperCase());
+            ps.setString(2, from.toString());
+            ps.setString(3, to.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    dates.add(LocalDate.parse(rs.getString(1)));
+                }
+            }
+        }
+        return dates;
+    }
+
+    private static StockRow readStockRow(ResultSet rs) throws SQLException {
+        return new StockRow(
+                rs.getString("ticker"),
+                LocalDate.parse(rs.getString("date")),
+                getFloat(rs, "open"),
+                getFloat(rs, "high"),
+                getFloat(rs, "low"),
+                getFloat(rs, "close"),
+                getFloat(rs, "ma5"),
+                getFloat(rs, "ma10"),
+                getFloat(rs, "ma20"),
+                getFloat(rs, "ma50"),
+                getFloat(rs, "ma200"),
+                getFloat(rs, "chandeMmt"),
+                getFloat(rs, "chalkinMF"));
     }
 
     /** All tickers for a single trading date, ordered by ticker. */
