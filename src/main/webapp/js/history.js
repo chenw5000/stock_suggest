@@ -1,5 +1,6 @@
 (function () {
   const PAGE_SIZE = 10;
+  const MAIN_COL_COUNT = 11;
 
   const params = new URLSearchParams(window.location.search);
   const tickerInput = document.getElementById("ticker");
@@ -80,6 +81,17 @@
     return '<span class="action ' + safe + '">' + safe + "</span>";
   }
 
+  function detailRow(label, value, cssClass) {
+    const body = value && String(value).trim() ? escapeHtml(value) : "—";
+    return (
+      '<tr class="detail-row ' + cssClass + '">' +
+      '<td colspan="' + MAIN_COL_COUNT + '">' +
+      '<span class="detail-label">' + escapeHtml(label) + "</span>" +
+      '<span class="detail-body">' + body + "</span>" +
+      "</td></tr>"
+    );
+  }
+
   function renderRows(rows) {
     tbody.innerHTML = "";
     if (!rows || rows.length === 0) {
@@ -105,7 +117,9 @@
         "<td>" + formatNum(row.suggestedStopPrice) + "</td>" +
         "<td>" + formatNum(row.suggestedEntryPrice) + "</td>" +
         "<td>" + formatNum(row.suggestedProfitPrice) + "</td>" +
-        "</tr>"
+        "</tr>" +
+        detailRow("thesis", row.thesis, "thesis") +
+        detailRow("risks", row.risks, "risks")
       );
     }).join("");
   }

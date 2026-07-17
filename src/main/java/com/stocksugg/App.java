@@ -8,6 +8,7 @@ import com.stocksugg.stock.GeminiStockAdvisor;
 import com.stocksugg.stock.GeminiSuggestion;
 import com.stocksugg.stock.MarketSession;
 import com.stocksugg.stock.StockDataImporter;
+import com.stocksugg.stock.TickerList;
 import com.stocksugg.web.WebServer;
 
 import java.time.LocalDate;
@@ -116,8 +117,8 @@ public class App {
     }
 
     private static void runBatchJob() {
-        List<String> tickers = List.of(
-                "AAPL", "TSLA", "MSFT", "NVDA", "GOOGL", "MU", "SOXX", "ARKG", "ARKK", "NOK");
+        List<String> tickers = TickerList.loadFromAdmin();
+        System.out.println("Using tickers from admin." + TickerList.ADMIN_KEY + ": " + tickers);
         for (String ticker : tickers) {
             refreshStockData(ticker);
         }

@@ -25,7 +25,7 @@ import java.util.Set;
 public final class GeminiStockAdvisor {
 
     /** Max historical as-of packages per Gemini call (keeps prompt size manageable). */
-    public static final int DEFAULT_HISTORICAL_CHUNK_SIZE = 8;
+    public static final int DEFAULT_HISTORICAL_CHUNK_SIZE = 4;
 
     public static final String SYSTEM_INSTRUCTION = """
             Use only provided OHLCV/indicators. No invented quotes. Return JSON schema.
@@ -80,7 +80,7 @@ public final class GeminiStockAdvisor {
             throw new IllegalStateException("No stock rows found for any requested ticker.");
         }
 
-        return requestAndPersist(snapshots, horizonTradingDays);
+        return requestAndPersist(snapshots, horizonTradingDays).persisted();
     }
 
     /**
@@ -149,16 +149,46 @@ public final class GeminiStockAdvisor {
 
         List<GeminiSuggestion> all = new ArrayList<>();
         for (int i = 0; i < snapshots.size(); i += chunkSize) {
-            List<AdviceSnapshot> chunk = snapshots.subList(i, Math.min(i + chunkSize, snapshots.size()));
-            System.out.println("Gemini historical batch for " + symbol
-                    + ": " + chunk.size() + " day(s) ("
-                    + chunk.getFirst().asOf() + " .. " + chunk.getLast().asOf() + ")");
-            all.addAll(requestAndPersist(chunk, horizonTradingDays));
+            List<AdviceSnapshot> chunk = new ArrayList<>(
+                    snapshots.subList(i, Math.min(i + chunkSize, snapshots.size())));
+            all.addAll(requestChunkWithRetry(chunk, horizonTradingDays));
         }
         return all;
     }
 
-    private List<GeminiSuggestion> requestAndPersist(
+    /**
+     * Sends a chunk to Gemini; any omitted asOf dates are retried one-by-one.
+     */
+    private List<GeminiSuggestion> requestChunkWithRetry(
+            List<AdviceSnapshot> chunk, int horizonTradingDays) throws Exception {
+        System.out.println("Gemini historical batch for " + chunk.getFirst().ticker()
+                + ": " + chunk.size() + " day(s) ("
+                + chunk.getFirst().asOf() + " .. " + chunk.getLast().asOf() + ")");
+        PersistResult first = requestAndPersist(chunk, horizonTradingDays);
+        List<GeminiSuggestion> all = new ArrayList<>(first.persisted());
+
+        List<AdviceSnapshot> omitted = chunk.stream()
+                .filter(s -> first.omittedKeys().contains(snapshotKey(s.ticker(), s.asOf())))
+                .toList();
+        if (omitted.isEmpty()) {
+            return all;
+        }
+
+        System.out.println("Retrying " + omitted.size()
+                + " omitted day(s) one at a time (Gemini often drops packages in large batches)...");
+        for (AdviceSnapshot snapshot : omitted) {
+            System.out.println("Retry Gemini for " + snapshot.ticker() + " on " + snapshot.asOf());
+            PersistResult retry = requestAndPersist(List.of(snapshot), horizonTradingDays);
+            all.addAll(retry.persisted());
+            if (!retry.omittedKeys().isEmpty()) {
+                System.err.println("Still missing after retry: " + snapshot.ticker()
+                        + " on " + snapshot.asOf());
+            }
+        }
+        return all;
+    }
+
+    private PersistResult requestAndPersist(
             List<AdviceSnapshot> snapshots,
             int horizonTradingDays) throws Exception {
         List<List<StockRow>> barLists = snapshots.stream().map(AdviceSnapshot::bars).toList();
@@ -166,20 +196,24 @@ public final class GeminiStockAdvisor {
                 StockSummaryBuilder.buildMultiSnapshotPackage(barLists, horizonTradingDays);
 
         Set<String> expectedKeys = new HashSet<>();
-        Map<String, LocalDate> expectedAsOf = new LinkedHashMap<>();
+        List<String> asOfList = new ArrayList<>();
         for (AdviceSnapshot snapshot : snapshots) {
-            String key = snapshotKey(snapshot.ticker(), snapshot.asOf());
-            expectedKeys.add(key);
-            expectedAsOf.put(key, snapshot.asOf());
+            expectedKeys.add(snapshotKey(snapshot.ticker(), snapshot.asOf()));
+            asOfList.add(snapshot.asOf().toString());
         }
 
         String userPrompt = """
                 Analyze this multi-stock market package and return one suggestion per stock package.
+                You MUST return exactly %d suggestion(s), one for each asOf date: %s.
                 Each package has its own ticker and asOf date — treat that asOf as the decision date
                 (do not use later information), and return the same asOf in each suggestion.
+                Do not omit any asOf date from the list.
                 Package:
                 %s
-                """.formatted(objectMapper.writeValueAsString(payload));
+                """.formatted(
+                snapshots.size(),
+                String.join(", ", asOfList),
+                objectMapper.writeValueAsString(payload));
 
         GenerateContentConfig config = GenerateContentConfig.builder()
                 .systemInstruction(Content.fromParts(Part.fromText(SYSTEM_INSTRUCTION)))
@@ -247,7 +281,7 @@ public final class GeminiStockAdvisor {
             System.out.println("Gemini omitted " + missing.size()
                     + " package(s) in this batch: " + missing);
         }
-        return persisted;
+        return new PersistResult(persisted, missing);
     }
 
     public static void printSuggestion(GeminiSuggestion suggestion) {
@@ -284,6 +318,8 @@ public final class GeminiStockAdvisor {
     }
 
     private record AdviceSnapshot(String ticker, LocalDate asOf, List<StockRow> bars) {}
+
+    private record PersistResult(List<GeminiSuggestion> persisted, Set<String> omittedKeys) {}
 
     private static Schema batchSuggestionSchema() {
         return Schema.builder()
