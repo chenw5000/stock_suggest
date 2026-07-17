@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockSugg — suggestions</title>
+  <link rel="stylesheet" href="css/suggest.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <h1>Gemini suggestions</h1>
+        <p class="meta" id="meta">Loading…</p>
+      </div>
+      <form id="date-form" class="date-form" action="suggest.html" method="get">
+        <button type="button" id="prev-day" aria-label="Previous day">Previous</button>
+        <label for="date">Date</label>
+        <input id="date" name="date" type="date" required>
+        <button type="button" id="next-day" aria-label="Next day">Next</button>
+        <button type="submit">Load</button>
+      </form>
+    </header>
+    <p class="error" id="error" hidden></p>
+    <div class="table-wrap" id="table-wrap">
+      <p class="empty" id="empty" hidden>No stock rows found for this date.</p>
+      <table id="suggest-table" hidden>
+        <thead>
+          <tr>
+            <th>ticker</th>
+            <th>close</th>
+            <th>change</th>
+            <th>ma50</th>
+            <th>chandeMmt</th>
+            <th>chalkinMF</th>
+            <th>suggestedAction</th>
+            <th>confidence</th>
+            <th>suggestedStopPrice</th>
+            <th>suggestedEntryPrice</th>
+            <th>suggestedProfitPrice</th>
+          </tr>
+        </thead>
+        <tbody id="suggest-body"></tbody>
+      </table>
+    </div>
+    <p class="meta"><a href="index.html">← Home</a> · <a href="history.html">Ticker history</a> · <a href="admin.html">Admin</a></p>
+  </main>
+  <script src="js/suggest.js"></script>
+</body>
+</html>

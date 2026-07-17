@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockSugg — admin</title>
+  <link rel="stylesheet" href="css/suggest.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <h1>Admin properties</h1>
+        <p class="meta" id="meta">Loading…</p>
+      </div>
+    </header>
+
+    <section class="admin-form-panel">
+      <h2 class="section-title">Create / update</h2>
+      <form id="admin-form" class="admin-form">
+        <label for="key">Key</label>
+        <input id="key" name="key" type="text" required maxlength="100" autocomplete="off" spellcheck="false">
+        <label for="value">Value</label>
+        <input id="value" name="value" type="text" maxlength="155" autocomplete="off">
+        <div class="admin-form-actions">
+          <button type="submit">Save</button>
+          <button type="button" id="clear-form">Clear</button>
+        </div>
+      </form>
+      <p class="status" id="status" hidden></p>
+    </section>
+
+    <p class="error" id="error" hidden></p>
+    <div class="table-wrap" id="table-wrap">
+      <p class="empty" id="empty" hidden>No admin properties yet.</p>
+      <table id="admin-table" hidden>
+        <thead>
+          <tr>
+            <th>id</th>
+            <th>key</th>
+            <th>value</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="admin-body"></tbody>
+      </table>
+    </div>
+
+    <p class="meta">
+      <a href="index.html">← Home</a>
+      · <a href="suggest.html">Suggestions</a>
+      · <a href="history.html">History</a>
+    </p>
+  </main>
+  <script src="js/admin.js"></script>
+</body>
+</html>

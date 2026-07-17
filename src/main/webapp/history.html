@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockSugg — history</title>
+  <link rel="stylesheet" href="css/suggest.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <h1>Ticker history</h1>
+        <p class="meta" id="meta">Loading…</p>
+      </div>
+      <form id="ticker-form" class="date-form" action="history.html" method="get">
+        <label for="ticker">Ticker</label>
+        <input id="ticker" name="ticker" type="text" required maxlength="10" spellcheck="false" autocomplete="off">
+        <button type="submit">Load</button>
+      </form>
+    </header>
+    <p class="error" id="error" hidden></p>
+    <div class="table-wrap" id="table-wrap">
+      <p class="empty" id="empty" hidden>No history rows found for this ticker.</p>
+      <table id="history-table" hidden>
+        <thead>
+          <tr>
+            <th>date</th>
+            <th>close</th>
+            <th>change</th>
+            <th>ma50</th>
+            <th>chandeMmt</th>
+            <th>chalkinMF</th>
+            <th>suggestedAction</th>
+            <th>confidence</th>
+            <th>suggestedStopPrice</th>
+            <th>suggestedEntryPrice</th>
+            <th>suggestedProfitPrice</th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+    <nav class="pagination" id="pagination" hidden aria-label="History pages"></nav>
+    <p class="meta">
+      <a href="index.html">← Home</a>
+      · <a id="suggest-link" href="suggest.html">Suggestions</a>
+    </p>
+  </main>
+  <script src="js/history.js"></script>
+</body>
+</html>

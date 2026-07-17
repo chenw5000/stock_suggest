@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockSugg</title>
+  <link rel="stylesheet" href="css/suggest.css">
+</head>
+<body>
+  <main class="home">
+    <h1>StockSugg</h1>
+    <p class="meta">Gemini stock suggestions from your database.</p>
+    <form id="date-form" class="date-form" action="suggest.html" method="get">
+      <label for="date">Date</label>
+      <input id="date" name="date" type="date" required>
+      <button type="submit">View suggestions</button>
+    </form>
+    <form class="date-form" action="history.html" method="get" style="margin-top:1rem">
+      <label for="ticker">Ticker</label>
+      <input id="ticker" name="ticker" type="text" required maxlength="10" spellcheck="false" autocomplete="off" placeholder="AAPL">
+      <button type="submit">View history</button>
+    </form>
+    <p class="meta">
+      API: <code id="api-example"></code>
+      · <a href="health">/health</a>
+      · <a href="admin.html">Admin</a>
+    </p>
+  </main>
+  <script>
+    const input = document.getElementById("date");
+    const today = new Date().toISOString().slice(0, 10);
+    input.value = today;
+    const base = document.body.dataset.context || ".";
+    document.getElementById("api-example").textContent =
+      "GET " + new URL("api/suggest/" + today, window.location.href).pathname;
+  </script>
+</body>
+</html>

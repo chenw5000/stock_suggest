@@ -1,0 +1,33 @@
+# Compiled class files
+*.class
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
+*.bak
+
+# Secrets
+.env
+*.pem
+
+# Local database files
+data/
+*.mv.db
+*.trace.db
+*.lock.db
+
