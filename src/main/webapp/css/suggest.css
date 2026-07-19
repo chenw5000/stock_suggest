@@ -161,6 +161,22 @@ tr.detail-row.risks td {
 
 .detail-body { line-height: 1.45; }
 
+.detail-list {
+  display: inline-block;
+  margin: 0;
+  padding-left: 1.15rem;
+  vertical-align: top;
+  max-width: calc(100% - 6rem);
+}
+
+.detail-list li {
+  margin: 0.15rem 0;
+}
+
+.detail-list li + li {
+  margin-top: 0.35rem;
+}
+
 .action {
   display: inline-block;
   padding: 0.15rem 0.45rem;

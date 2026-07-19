@@ -13,7 +13,6 @@ import com.stocksugg.gemini.GeminiService;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,7 +28,7 @@ public final class GeminiStockAdvisor {
 
     public static final String SYSTEM_INSTRUCTION = """
             Use only provided OHLCV/indicators. No invented quotes. Return JSON schema.
-            If data is insufficient for a package, action=AVOID and explain for that package.
+            If data is insufficient for a package, action=NA and explain for that package.
             Price ranges must be grounded in the supplied prices/levels (entryPriceRange,
             cutlossPriceRange, profitTakingPriceRange). confidence is 0.0-1.0.
             When multiple stock packages are provided, return exactly one suggestion object
@@ -204,6 +203,25 @@ public final class GeminiStockAdvisor {
 
         String userPrompt = """
                 Analyze this multi-stock market package and return one suggestion per stock package.
+
+                in the response 'thesis', include the following information:
+                - INDICATOR ANALYSIS: the suggestion based on the passed in moving averages and indicators
+                - TREND CONTEXT: Identify the prevailing short-term and medium-term trend context leading into the final 5 candlesticks.
+                - K-LINE RECOGNITION: Scan the most recent 1 to 5 candlesticks. Identify any specific price-action candlestick patterns (e.g., Doji, Hammer, Bullish/Bearish Engulfing, Marubozu, Harami, Piercing Line, or multi-bar reversal/continuation structures).
+                - VOLUME VALIDATION: Analyze whether the volume on the pattern bars confirms the move (e.g., expanding volume on breakout/reversal bars, or drying volume on pullbacks).
+                - TRADING SUGGESTIONS: Based strictly on the identified K-line setup and structural context, provide an actionable execution table with:
+                   - Aggressive Entry Zone
+                   - Conservative Entry Zone
+                   - Stop Loss Zone
+                   - Profit Taking Zone
+                   - Time Frame
+                   - Potential Opportunities
+                   - Potential Risks
+                   - Potential Rewards
+                - Summarize and provide a final recommendation based on the analysis.
+
+                Based on the 'thesis' and 'risks', provide a final suggestion on the action to take.
+
                 You MUST return exactly %d suggestion(s), one for each asOf date: %s.
                 Each package has its own ticker and asOf date — treat that asOf as the decision date
                 (do not use later information), and return the same asOf in each suggestion.

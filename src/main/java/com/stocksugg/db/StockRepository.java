@@ -2,6 +2,7 @@ package com.stocksugg.db;
 
 import com.stocksugg.stock.StockDayView;
 import com.stocksugg.stock.StockRow;
+import com.stocksugg.stock.StringListCodec;
 import com.stocksugg.stock.SuggestionUpdate;
 
 import java.sql.Connection;
@@ -284,8 +285,8 @@ public final class StockRepository {
                             getFloat(rs, "suggestedStopPrice"),
                             getFloat(rs, "suggestedEntryPrice"),
                             getFloat(rs, "suggestedProfitPrice"),
-                            rs.getString("thesis"),
-                            rs.getString("risks")));
+                            StringListCodec.decode(rs.getString("thesis")),
+                            StringListCodec.decode(rs.getString("risks"))));
                 }
             }
         }
@@ -347,8 +348,8 @@ public final class StockRepository {
                     row.put("suggestedStopPrice", getFloat(rs, "suggestedStopPrice"));
                     row.put("suggestedEntryPrice", getFloat(rs, "suggestedEntryPrice"));
                     row.put("suggestedProfitPrice", getFloat(rs, "suggestedProfitPrice"));
-                    row.put("thesis", rs.getString("thesis"));
-                    row.put("risks", rs.getString("risks"));
+                    row.put("thesis", StringListCodec.decode(rs.getString("thesis")));
+                    row.put("risks", StringListCodec.decode(rs.getString("risks")));
 
                     Float close = getFloat(rs, "close");
                     Float previousClose = getFloat(rs, "previousClose");

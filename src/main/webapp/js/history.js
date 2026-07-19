@@ -82,7 +82,12 @@
   }
 
   function detailRow(label, value, cssClass) {
-    const body = value && String(value).trim() ? escapeHtml(value) : "—";
+    const items = normalizeList(value);
+    const body = items.length
+      ? '<ul class="detail-list">' +
+        items.map((item) => "<li>" + escapeHtml(item) + "</li>").join("") +
+        "</ul>"
+      : "—";
     return (
       '<tr class="detail-row ' + cssClass + '">' +
       '<td colspan="' + MAIN_COL_COUNT + '">' +
@@ -90,6 +95,30 @@
       '<span class="detail-body">' + body + "</span>" +
       "</td></tr>"
     );
+  }
+
+  function normalizeList(value) {
+    if (value == null) {
+      return [];
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+    const text = String(value).trim();
+    if (!text) {
+      return [];
+    }
+    if (text.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => String(item).trim()).filter(Boolean);
+        }
+      } catch (_) {
+        /* fall through */
+      }
+    }
+    return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   }
 
   function renderRows(rows) {

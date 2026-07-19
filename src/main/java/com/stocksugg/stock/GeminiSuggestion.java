@@ -3,7 +3,6 @@ package com.stocksugg.stock;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** Parsed Gemini suggestion response. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -32,17 +31,7 @@ public record GeminiSuggestion(
                 PriceRangeParser.midpoint(cutlossPriceRange).orElse(null),
                 PriceRangeParser.midpoint(entryPriceRange).orElse(null),
                 PriceRangeParser.midpoint(profitTakingPriceRange).orElse(null),
-                joinLines(thesis),
-                joinLines(risks));
-    }
-
-    private static String joinLines(List<String> items) {
-        if (items == null || items.isEmpty()) {
-            return null;
-        }
-        return items.stream()
-                .filter(item -> item != null && !item.isBlank())
-                .map(String::trim)
-                .collect(Collectors.joining("\n"));
+                StringListCodec.encode(thesis),
+                StringListCodec.encode(risks));
     }
 }

@@ -1,6 +1,7 @@
 package com.stocksugg.stock;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /** Full stock row including Gemini suggestion fields (for UI / reports). */
 public record StockDayView(
@@ -23,6 +24,6 @@ public record StockDayView(
         Float suggestedStopPrice,
         Float suggestedEntryPrice,
         Float suggestedProfitPrice,
-        String thesis,
-        String risks
+        List<String> thesis,
+        List<String> risks
 ) {}
