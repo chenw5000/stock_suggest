@@ -26,6 +26,29 @@ public final class GeminiStockAdvisor {
     /** Max historical as-of packages per Gemini call (keeps prompt size manageable). */
     public static final int DEFAULT_HISTORICAL_CHUNK_SIZE = 4;
 
+    /** Canonical meanings for the action field (long-position framing only). */
+    private static final String ACTION_DEFINITIONS = """
+            Set action to exactly one of BUY, HOLD, SELL, AVOID, or NA (insufficient data only).
+            Use long-position framing only — do not recommend opening a short.
+            - BUY: Favorable setup to enter or add a long position. Bullish trend, momentum,
+              volume, and/or candlestick structure with acceptable risk/reward over
+              horizonTradingDays. entryPriceRange and profitTakingPriceRange should support
+              a new or increased long.
+            - HOLD: No new trade. Signals are mixed, range-bound, or inconclusive. If already
+              long, no strong reason to add or exit; wait for confirmation. Do not use HOLD
+              when a clear entry or exit case exists.
+            - SELL: Favor exiting or reducing an existing long. Bearish trend, breakdown,
+              weakening momentum/volume, or bearish patterns suggest downside risk over
+              horizonTradingDays. cutlossPriceRange / profitTakingPriceRange should reflect
+              exit or de-risking, not a new long entry.
+            - AVOID: Do not initiate a new long. Setup is unclear, choppy, or poor
+              risk/reward — worse than HOLD for someone considering entry. Use when
+              staying flat (no new position) is the best call even if an existing holder
+              might HOLD.
+            - NA: Use only when supplied data is insufficient to analyze that package.
+            After writing thesis and risks, pick the single best-fitting action label.
+            """;
+
     public static final String SYSTEM_INSTRUCTION = """
             Use only provided OHLCV/indicators. No invented quotes. Return JSON schema.
             If data is insufficient for a package, action=NA and explain for that package.
@@ -34,7 +57,8 @@ public final class GeminiStockAdvisor {
             When multiple stock packages are provided, return exactly one suggestion object
             per package in the suggestions array. Each package has ticker + asOf — copy that
             asOf into the suggestion, keep packages independent, and do not use later data.
-            """;
+
+            """ + ACTION_DEFINITIONS;
 
     private final StockRepository repository;
     private final GeminiService gemini;
@@ -220,7 +244,8 @@ public final class GeminiStockAdvisor {
                    - Potential Rewards
                 - Summarize and provide a final recommendation based on the analysis.
 
-                Based on the 'thesis' and 'risks', provide a final suggestion on the action to take.
+                Based on the thesis and risks, set action using these definitions:
+                """ + ACTION_DEFINITIONS + """
 
                 You MUST return exactly %d suggestion(s), one for each asOf date: %s.
                 Each package has its own ticker and asOf date — treat that asOf as the decision date
@@ -372,7 +397,10 @@ public final class GeminiStockAdvisor {
                         Map.entry("asOf", Schema.builder().type(Type.Known.STRING).build()),
                         Map.entry("action", Schema.builder()
                                 .type(Type.Known.STRING)
-                                .description("One of BUY, HOLD, SELL, AVOID")
+                                .description(
+                                        "Exactly one of: BUY (enter/add long), HOLD (no new trade; "
+                                                + "keep if long), SELL (exit/reduce long), "
+                                                + "AVOID (do not open new long), NA (insufficient data)")
                                 .build()),
                         Map.entry("confidence", Schema.builder().type(Type.Known.NUMBER).build()),
                         Map.entry("entryPriceRange", Schema.builder()

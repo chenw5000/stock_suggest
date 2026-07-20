@@ -133,6 +133,41 @@ th:nth-child(7), td:nth-child(7) {
 
 tr.main-row:hover { background: rgba(255, 255, 255, 0.03); }
 
+td.date-cell {
+  white-space: nowrap;
+}
+
+.detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  margin-right: 0.4rem;
+  padding: 0;
+  vertical-align: middle;
+  background: #1e3a4f;
+  color: var(--accent);
+  border: 1px solid #2f5670;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.65rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.detail-toggle:hover {
+  background: #25485f;
+}
+
+.detail-toggle[aria-expanded="true"] {
+  background: #25485f;
+}
+
+.date-text {
+  vertical-align: middle;
+}
+
 tr.detail-row td {
   background: var(--detail);
   border-bottom: 1px solid #1c2733;

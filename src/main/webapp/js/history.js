@@ -89,7 +89,7 @@
         "</ul>"
       : "—";
     return (
-      '<tr class="detail-row ' + cssClass + '">' +
+      '<tr class="detail-row ' + cssClass + '" hidden>' +
       '<td colspan="' + MAIN_COL_COUNT + '">' +
       '<span class="detail-label">' + escapeHtml(label) + "</span>" +
       '<span class="detail-body">' + body + "</span>" +
@@ -135,7 +135,13 @@
       const action = row.suggestedAction ? String(row.suggestedAction).toUpperCase() : "";
       return (
         '<tr class="main-row">' +
-        "<td>" + escapeHtml(row.date || "") + "</td>" +
+        '<td class="date-cell">' +
+        '<button type="button" class="detail-toggle" aria-expanded="false" ' +
+        'aria-label="Show details" title="Show details">' +
+        '<span class="detail-toggle-icon" aria-hidden="true">▶</span>' +
+        "</button>" +
+        '<span class="date-text">' + escapeHtml(row.date || "") + "</span>" +
+        "</td>" +
         "<td>" + formatNum(row.close) + "</td>" +
         formatChangeCell(row.change, row.changePct) +
         "<td>" + formatNum(row.ma50) + "</td>" +
@@ -151,6 +157,33 @@
         detailRow("risks", row.risks, "risks")
       );
     }).join("");
+
+    bindDetailToggles();
+  }
+
+  function bindDetailToggles() {
+    tbody.querySelectorAll(".detail-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mainRow = btn.closest("tr.main-row");
+        if (!mainRow) {
+          return;
+        }
+        const expand = btn.getAttribute("aria-expanded") !== "true";
+        btn.setAttribute("aria-expanded", expand ? "true" : "false");
+        btn.setAttribute("aria-label", expand ? "Hide details" : "Show details");
+        btn.setAttribute("title", expand ? "Hide details" : "Show details");
+        const icon = btn.querySelector(".detail-toggle-icon");
+        if (icon) {
+          icon.textContent = expand ? "▼" : "▶";
+        }
+
+        let next = mainRow.nextElementSibling;
+        while (next && next.classList.contains("detail-row")) {
+          next.hidden = !expand;
+          next = next.nextElementSibling;
+        }
+      });
+    });
   }
 
   function renderPagination(data) {
