@@ -1,5 +1,6 @@
 package com.stocksugg.db;
 
+import com.stocksugg.stock.BacktestDay;
 import com.stocksugg.stock.StockDayView;
 import com.stocksugg.stock.StockRow;
 import com.stocksugg.stock.StringListCodec;
@@ -55,6 +56,13 @@ public final class StockRepository {
 
     private static final String SELECT_DATES_IN_RANGE = """
             SELECT "date"
+            FROM stock
+            WHERE ticker = ? AND "date" >= ? AND "date" <= ?
+            ORDER BY "date"
+            """;
+
+    private static final String SELECT_BACKTEST_DAYS = """
+            SELECT "date", close, suggestedAction, confidence
             FROM stock
             WHERE ticker = ? AND "date" >= ? AND "date" <= ?
             ORDER BY "date"
@@ -239,6 +247,34 @@ public final class StockRepository {
             }
         }
         return dates;
+    }
+
+    /**
+     * Close price + suggestedAction for ticker in [{@code from}, {@code to}], ascending by date.
+     * Days with a null close are omitted.
+     */
+    public List<BacktestDay> findBacktestDays(String ticker, LocalDate from, LocalDate to)
+            throws SQLException {
+        List<BacktestDay> days = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_BACKTEST_DAYS)) {
+            ps.setString(1, ticker.toUpperCase());
+            ps.setString(2, from.toString());
+            ps.setString(3, to.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Float close = getFloat(rs, "close");
+                    if (close == null) {
+                        continue;
+                    }
+                    days.add(new BacktestDay(
+                            LocalDate.parse(rs.getString("date")),
+                            close,
+                            rs.getString("suggestedAction"),
+                            getFloat(rs, "confidence")));
+                }
+            }
+        }
+        return days;
     }
 
     private static StockRow readStockRow(ResultSet rs) throws SQLException {

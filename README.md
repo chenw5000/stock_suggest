@@ -193,14 +193,153 @@ Each row stores Gemini’s **`suggestedAction`** — a headline label for what t
 
 ---
 
+
+## Backtesting
+
+StockSugg can simulate a long-only account using stored daily `close` prices plus Gemini `suggestedAction` / `confidence`. Two CLI modes:
+
+| Mode | Flag | Purpose |
+|------|------|---------|
+| Fixed strategy | `--backtest` | Run one rule set (`all-in` or equal `parts`) |
+| Strategy search | `--optimize` | Grid-search parts, confidence floors, and how BUY/SELL/HOLD/AVOID map to trade intents |
+
+Fills are **whole shares at that day's close** (no commissions/slippage). Results are research-only and **in-sample** when you optimize on the same window you evaluate.
+
+### How to prepare the data
+
+1. **Yahoo OHLCV in range** for the ticker (close must exist every trading day you care about).
+2. **Gemini suggestions filled** for those days (`suggestedAction`, preferably `confidence` too).
+
+Typical prep:
+
+```powershell
+# 1) Ensure the ticker is on the watch list (admin TICKERS), then refresh prices
+mvn compile exec:java "-Dexec.args=--batch"
+
+# 2) Backfill Gemini suggestions for the backtest window
+mvn compile exec:java "-Dexec.args=--backfill --ticker=QQQ --from=2026-01-01 --to=2026-07-17"
+```
+
+Notes:
+
+- `--batch` only downloads **new** dates (does not wipe existing suggestion columns).
+- `--backfill` **overwrites** suggestion fields for each day it successfully advises.
+- Confirm coverage in the UI (`history.html?ticker=QQQ`) or by checking that optimize/backtest reports many days "with suggestedAction".
+
+### How to run
+
+**Unit tests** (strategy engine):
+
+```powershell
+mvn "-Dtest=SuggestionBacktesterTest" test
+```
+
+**Fixed backtest — all cash in / all out** (BUY buys full cash when flat; SELL/AVOID sell all; HOLD does nothing):
+
+```powershell
+mvn compile exec:java "-Dexec.args=--backtest --ticker=QQQ --from=2026-01-01 --to=2026-07-17 --cash=10000 --strategy=all-in"
+```
+
+**Fixed backtest — equal parts** (cash split into N budgets; BUY spends one part; SELL/AVOID sell one FIFO lot):
+
+```powershell
+mvn compile exec:java "-Dexec.args=--backtest --ticker=QQQ --from=2026-01-01 --to=2026-07-17 --cash=10000 --strategy=parts --parts=4"
+```
+
+**Strategy search** (grid over parts, confidence thresholds, and action-to-intent mappings):
+
+```powershell
+mvn compile exec:java "-Dexec.args=--optimize --ticker=TSLA --from=2026-01-01 --to=2026-07-17 --cash=10000 --top=15"
+```
+
+### Command arguments
+
+| Argument | Used by | Default | Meaning |
+|----------|---------|---------|---------|
+| `--backtest` | backtest | — | Run a single strategy |
+| `--optimize` | optimize | — | Grid-search strategies |
+| `--ticker=SYM` | both | `QQQ` | Symbol (must exist in DB) |
+| `--from=yyyy-MM-dd` | both | `2026-01-01` | Inclusive start date |
+| `--to=yyyy-MM-dd` | both | `2026-07-17` | Inclusive end date |
+| `--cash=10000` | both | `10000` | Starting cash |
+| `--strategy=all-in\|parts` | backtest | `all-in` | Position sizing mode |
+| `--parts=4` | backtest | `4` | Number of equal cash parts when `strategy=parts` |
+| `--top=15` | optimize | `15` | How many best strategies to print |
+
+**`--strategy=all-in` rules**
+
+- **BUY** — if flat, buy as many whole shares as cash allows; if already long, skip
+- **SELL** — sell all shares
+- **HOLD** — do nothing
+- **AVOID** — if long, sell all
+
+**`--strategy=parts` rules**
+
+- Starting cash is split into `--parts` equal budgets (e.g. $10,000 / 4 = $2,500)
+- **BUY** — if cash remains, spend one part (one lot)
+- **SELL** or **AVOID** — sell the oldest lot (one part)
+- **HOLD** — do nothing
+
+**`--optimize` search space** (approximate)
+
+- `parts`: 1, 2, 3, 4, 5, 6, 8, 10
+- min buy / sell confidence: 0.00 … 0.80
+- BUY → `BUY_PART` or `BUY_ALL`
+- SELL / AVOID → `NONE`, `SELL_PART`, or `SELL_ALL`
+- HOLD → always `NONE`
+
+### What the results look like
+
+**`--backtest`** prints each fill, then a summary:
+
+```text
+Backtest QQQ from 2026-01-01 to 2026-07-17 starting cash $10,000.00 strategy=parts parts=4
+Trading days: 135 (with suggestedAction: 135)
+Part size: $2,500.00 (4 equal parts)
+--- Trades ---
+2026-01-06  BUY_PART                    +4 @ 623.42  cash=$7,506.32  shares=4  equity=$10,000.00
+2026-01-16  SELL_PART                   -4 @ 621.26  cash=$3,733.82  shares=10 equity=$9,946.42
+...
+--- Summary ---
+Starting cash: $10,000.00
+Ending cash:   $10,653.34
+Ending shares: 0 @ last close 695.33
+Ending equity: $10,653.34
+Return:        +6.53%
+Buys / sells / skipped buys: 26 / 26 / 23
+```
+
+**`--optimize`** prints baselines, the top-N parameter sets, then the best strategy's real (non-skip) trades:
+
+```text
+Strategy search TSLA from 2026-01-01 to 2026-07-17 cash $10,000.00 top=15
+Trading days: 135
+--- Baselines ---
+Buy & hold                                equity=$8,740.94  return=-12.59%
+All-in (BUY all / SELL·AVOID all)         equity=$8,903.22  return=-10.97%
+4 equal parts                             equity=$8,950.96  return=-10.49%
+--- Top 15 strategies by ending equity ---
+#1  equity=$10,277.96  return=+2.78%  buys=7 sells=4 skippedBuys=1
+    parts=4 buyConf>=0.80 sellConf>=0.70 BUY->BUY_PART SELL->SELL_ALL HOLD->NONE AVOID->NONE
+...
+--- Best strategy trades ---
+2026-04-17  BUY_PART               +6 @ 400.62  cash=$7,596.28  shares=6  equity=$10,000.00  conf=0.80
+2026-05-12  SELL_ALL              -24 @ 433.45  cash=$10,828.36 shares=0  equity=$10,828.36 conf=0.75
+...
+```
+
+Treat optimized winners as **hypotheses** to retest on other tickers/dates; they are fitted to the window you searched.
+
+---
 ## Project layout (quick map)
 
 | Area | Role |
 |------|------|
-| `App` | CLI: `--batch`, `--backfill`, `--embedded` |
+| `App` | CLI: `--batch`, `--backfill`, `--backtest`, `--optimize`, `--embedded` |
 | `StockDataImporter` / Yahoo client | Download + indicator enrichment |
 | `StockRepository` | Postgres persistence (insert missing dates only) |
 | `GeminiStockAdvisor` | Prompt Gemini and write suggestion columns |
+| `SuggestionBacktester` / `SuggestionStrategyOptimizer` | Suggestion-driven backtest and parameter search |
 | `webapp/` + `StockSuggServlet` | Tomcat UI and JSON APIs |
 | `admin` table | `TICKERS`, `GEMINI_API_KEY`, other config |
 
