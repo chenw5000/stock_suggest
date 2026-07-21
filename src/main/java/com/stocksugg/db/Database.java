@@ -82,6 +82,7 @@ public final class Database implements AutoCloseable {
                     ma20 REAL,
                     ma50 REAL,
                     ma200 REAL,
+                    rsi14 REAL,
                     chandemmt REAL,
                     chalkinmf REAL,
                     suggestedaction VARCHAR(16),
@@ -93,6 +94,7 @@ public final class Database implements AutoCloseable {
                     risks TEXT
                 )
                 """);
+        stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS rsi14 REAL");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedaction VARCHAR(16)");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS confidence REAL");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedstopprice REAL");
@@ -124,6 +126,7 @@ public final class Database implements AutoCloseable {
                     ma20 FLOAT,
                     ma50 FLOAT,
                     ma200 FLOAT,
+                    rsi14 FLOAT,
                     chandeMmt FLOAT,
                     chalkinMF FLOAT,
                     suggestedAction VARCHAR(16),
@@ -135,6 +138,7 @@ public final class Database implements AutoCloseable {
                     risks TEXT
                 )
                 """);
+        stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS rsi14 FLOAT");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedAction VARCHAR(16)");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS confidence FLOAT");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedStopPrice FLOAT");

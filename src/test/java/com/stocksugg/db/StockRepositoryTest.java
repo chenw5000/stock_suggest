@@ -6,9 +6,12 @@ import org.junit.jupiter.api.Test;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StockRepositoryTest {
@@ -40,6 +43,26 @@ class StockRepositoryTest {
 
             assertEquals(1, inserted);
             assertEquals(2, repository.countByTicker("AAPL"));
+            assertEquals(62f, repository.findAllBars("AAPL").getLast().rsi14(), 0.001f);
+            assertEquals(62f, repository.findRecentBars("AAPL", 10).getLast().rsi14(), 0.001f);
+            assertEquals(62f, repository.findBarsEndingOn(
+                    "AAPL", LocalDate.parse("2026-07-16"), 10).getLast().rsi14(), 0.001f);
+            assertEquals(62f, repository.findBarsInRange(
+                    "AAPL",
+                    LocalDate.parse("2026-07-16"),
+                    LocalDate.parse("2026-07-16")).getFirst().rsi14(), 0.001f);
+            assertEquals(62f, repository.findByDate(
+                    LocalDate.parse("2026-07-16")).getFirst().rsi14(), 0.001f);
+            assertEquals(62f, (Float) repository.findHistoryPage(
+                    "AAPL", 1, 10).getFirst().get("rsi14"), 0.001f);
+
+            Map<LocalDate, Float> rsiValues = new LinkedHashMap<>();
+            rsiValues.put(LocalDate.parse("2026-07-15"), null);
+            rsiValues.put(LocalDate.parse("2026-07-16"), 71f);
+            assertEquals(2, repository.updateRsi14("AAPL", rsiValues));
+            List<StockRow> updatedRows = repository.findAllBars("AAPL");
+            assertNull(updatedRows.getFirst().rsi14());
+            assertEquals(71f, updatedRows.getLast().rsi14(), 0.001f);
 
             try (ResultSet rs = stmt.executeQuery("""
                     SELECT close, thesis, risks, suggestedAction
@@ -60,6 +83,6 @@ class StockRepositoryTest {
                 ticker,
                 LocalDate.parse(date),
                 close, close, close, close,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, 62f, null, null);
     }
 }

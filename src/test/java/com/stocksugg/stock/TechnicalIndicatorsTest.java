@@ -23,6 +23,28 @@ class TechnicalIndicatorsTest {
     }
 
     @Test
+    void relativeStrengthIndexUsesWilderSmoothing() {
+        double[] close = {1, 2, 3, 2, 4};
+
+        Float[] rsi = TechnicalIndicators.relativeStrengthIndex(close, 3);
+
+        assertNull(rsi[2]);
+        assertEquals(66.6667f, rsi[3], 0.001f);
+        assertEquals(83.3333f, rsi[4], 0.001f);
+    }
+
+    @Test
+    void relativeStrengthIndexHandlesNoLossAndFlatPrices() {
+        Float[] rising = TechnicalIndicators.relativeStrengthIndex(
+                new double[] {1, 2, 3, 4}, 3);
+        Float[] flat = TechnicalIndicators.relativeStrengthIndex(
+                new double[] {5, 5, 5, 5}, 3);
+
+        assertEquals(100f, rising[3], 0.001f);
+        assertEquals(50f, flat[3], 0.001f);
+    }
+
+    @Test
     void enrichComputesMovingAverages() {
         List<StockBar> bars = new ArrayList<>();
         for (int i = 0; i < 10; i++) {

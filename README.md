@@ -93,7 +93,8 @@ Other CLI options:
 
 ```text
 --backfill --ticker=AAPL --from=2026-07-01 --to=2026-07-14
---embedded   # local Javalin on port 7070 (dev)
+--update-rsi   # recompute rsi14 for every watch-list ticker from stored closes
+--embedded     # local Javalin on port 7070 (dev)
 ```
 
 ---
@@ -124,7 +125,7 @@ After changing `TICKERS`, run a batch so new symbols get historical Yahoo data (
 
 ## Technical indicators
 
-After each Yahoo download, StockSugg computes indicators in `TechnicalIndicators` and stores them on every daily row. Gemini receives recent bars plus a latest summary (including MA stack and close vs MA50).
+After each Yahoo download, StockSugg computes indicators in `TechnicalIndicators` and stores them on every daily row: SMAs, Wilder RSI(14), the Chande Momentum Oscillator, and Chaikin Money Flow. Gemini receives recent bars plus a latest summary (including MA stack and close vs MA50).
 
 ### Simple moving averages (SMA)
 
@@ -143,6 +144,33 @@ After each Yahoo download, StockSugg computes indicators in `TechnicalIndicators
 - **Distance from MA50:** large % above/below can mean stretched momentum (continuation or mean-reversion risk, depending on context).
 
 MAs lag price by design: they smooth noise but react slowly to sharp turns.
+
+### Relative Strength Index (`rsi14`, Wilder, period 14)
+
+Wilder's RSI measures the speed and size of recent gains versus losses over 14 sessions, using Wilder smoothing (an exponential-style running average of gains/losses):
+
+\[
+\mathrm{RSI} = 100 - \frac{100}{1 + \mathrm{RS}}, \qquad \mathrm{RS} = \frac{\text{avg gain}}{\text{avg loss}}
+\]
+
+Range is **0 to 100**. The first 14 rows of a series have no value (`null`) until enough price changes accumulate. Edge cases: a stretch with no losses yields 100, and perfectly flat prices yield 50.
+
+**Inferences**
+
+- **≥ 70:** overbought — strong upside momentum that may be stretched.
+- **≤ 30:** oversold — strong downside momentum that may be stretched.
+- **~50:** neutral momentum; no clear edge.
+- **Divergence:** price making new highs while RSI fails to confirm can warn of fading momentum (and vice versa at lows).
+
+RSI complements CMO (both are momentum oscillators) but uses Wilder smoothing rather than a flat window, so it reacts more smoothly to a single large move.
+
+**Backfilling `rsi14` on existing rows:** RSI was added after the initial schema, and normal `--batch` imports only insert *new* dates, so previously stored rows keep `rsi14 = NULL`. To populate history in place (recompute from stored closes, update only the `rsi14` column, and leave OHLCV/suggestions untouched):
+
+```powershell
+mvn compile exec:java "-Dexec.args=--update-rsi"
+```
+
+This runs for every ticker in the admin `TICKERS` watch list. The first 14 rows per ticker stay `null` (warm-up).
 
 ### Chande Momentum Oscillator (`chandeMmt`, period 14)
 
@@ -171,7 +199,7 @@ Measures buying vs selling pressure using close location in the day’s range, w
 - **Negative CMF:** closes toward the lows → distribution / selling pressure.
 - **Divergence:** price making new highs while CMF weakens can warn that upside is not well supported by volume; the opposite for lows.
 
-Together with MAs and CMO: trend (MAs) + momentum (CMO) + volume-backed pressure (CMF) give Gemini a compact technical package for each suggestion horizon (default 10 trading days).
+Together with MAs, RSI, and CMO: trend (MAs) + momentum (RSI + CMO) + volume-backed pressure (CMF) give Gemini a compact technical package for each suggestion horizon (default 10 trading days). Both the `latest` summary and every historical bar sent to Gemini include `rsi14`.
 
 ---
 
@@ -335,7 +363,7 @@ Treat optimized winners as **hypotheses** to retest on other tickers/dates; they
 
 | Area | Role |
 |------|------|
-| `App` | CLI: `--batch`, `--backfill`, `--backtest`, `--optimize`, `--embedded` |
+| `App` | CLI: `--batch`, `--backfill`, `--update-rsi`, `--backtest`, `--optimize`, `--embedded` |
 | `StockDataImporter` / Yahoo client | Download + indicator enrichment |
 | `StockRepository` | Postgres persistence (insert missing dates only) |
 | `GeminiStockAdvisor` | Prompt Gemini and write suggestion columns |

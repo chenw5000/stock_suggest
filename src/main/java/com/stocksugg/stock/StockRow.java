@@ -15,6 +15,7 @@ public record StockRow(
         Float ma20,
         Float ma50,
         Float ma200,
+        Float rsi14,
         Float chandeMmt,
         Float chalkinMF
 ) {}

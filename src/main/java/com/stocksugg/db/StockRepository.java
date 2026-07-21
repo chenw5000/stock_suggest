@@ -10,6 +10,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Types;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -32,22 +33,30 @@ public final class StockRepository {
     private static final String INSERT = """
             INSERT INTO stock (
                 ticker, "date", open, high, low, close,
-                ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private static final String SELECT_RECENT = """
             SELECT ticker, "date", open, high, low, close,
-                   ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF
+                   ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
             FROM stock
             WHERE ticker = ?
             ORDER BY "date" DESC
             LIMIT ?
             """;
 
+    private static final String SELECT_ALL_BARS = """
+            SELECT ticker, "date", open, high, low, close,
+                   ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
+            FROM stock
+            WHERE ticker = ? AND close IS NOT NULL
+            ORDER BY "date"
+            """;
+
     private static final String SELECT_BARS_ENDING_ON = """
             SELECT ticker, "date", open, high, low, close,
-                   ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF
+                   ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
             FROM stock
             WHERE ticker = ? AND "date" <= ?
             ORDER BY "date" DESC
@@ -63,7 +72,7 @@ public final class StockRepository {
 
     private static final String SELECT_BARS_IN_RANGE = """
             SELECT ticker, "date", open, high, low, close,
-                   ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF
+                   ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
             FROM stock
             WHERE ticker = ? AND "date" >= ? AND "date" <= ?
             ORDER BY "date"
@@ -78,7 +87,7 @@ public final class StockRepository {
 
     private static final String SELECT_BY_DATE = """
             SELECT id, ticker, "date", open, high, low, close,
-                   ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF,
+                   ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF,
                    suggestedAction, confidence,
                    suggestedStopPrice, suggestedEntryPrice, suggestedProfitPrice,
                    thesis, risks
@@ -102,14 +111,14 @@ public final class StockRepository {
 
     private static final String SELECT_HISTORY_PAGE = """
             SELECT id, ticker, "date", open, high, low, close,
-                   ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF,
+                   ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF,
                    suggestedAction, confidence,
                    suggestedStopPrice, suggestedEntryPrice, suggestedProfitPrice,
                    thesis, risks,
                    previousClose
             FROM (
                 SELECT id, ticker, "date", open, high, low, close,
-                       ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF,
+                       ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF,
                        suggestedAction, confidence,
                        suggestedStopPrice, suggestedEntryPrice, suggestedProfitPrice,
                        thesis, risks,
@@ -130,6 +139,12 @@ public final class StockRepository {
                 suggestedProfitPrice = ?,
                 thesis = ?,
                 risks = ?
+            WHERE ticker = ? AND "date" = ?
+            """;
+
+    private static final String UPDATE_RSI14 = """
+            UPDATE stock
+            SET rsi14 = ?
             WHERE ticker = ? AND "date" = ?
             """;
 
@@ -170,8 +185,9 @@ public final class StockRepository {
                     setFloat(insert, 9, row.ma20());
                     setFloat(insert, 10, row.ma50());
                     setFloat(insert, 11, row.ma200());
-                    setFloat(insert, 12, row.chandeMmt());
-                    setFloat(insert, 13, row.chalkinMF());
+                    setFloat(insert, 12, row.rsi14());
+                    setFloat(insert, 13, row.chandeMmt());
+                    setFloat(insert, 14, row.chalkinMF());
                     insert.addBatch();
                     inserted++;
                 }
@@ -217,6 +233,53 @@ public final class StockRepository {
         }
         Collections.reverse(newestFirst);
         return newestFirst;
+    }
+
+    /** All stored bars with a close for one ticker, returned oldest → newest. */
+    public List<StockRow> findAllBars(String ticker) throws SQLException {
+        List<StockRow> rows = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_ALL_BARS)) {
+            ps.setString(1, ticker.toUpperCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(readStockRow(rs));
+                }
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Updates only {@code rsi14} for the supplied dates. A null value clears RSI for warm-up rows.
+     */
+    public int updateRsi14(String ticker, Map<LocalDate, Float> valuesByDate) throws SQLException {
+        if (valuesByDate == null || valuesByDate.isEmpty()) {
+            return 0;
+        }
+
+        boolean previous = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        try (PreparedStatement update = connection.prepareStatement(UPDATE_RSI14)) {
+            for (Map.Entry<LocalDate, Float> entry : valuesByDate.entrySet()) {
+                setFloat(update, 1, entry.getValue());
+                update.setString(2, ticker.toUpperCase());
+                update.setString(3, entry.getKey().toString());
+                update.addBatch();
+            }
+            int updated = 0;
+            for (int count : update.executeBatch()) {
+                if (count > 0 || count == Statement.SUCCESS_NO_INFO) {
+                    updated++;
+                }
+            }
+            connection.commit();
+            return updated;
+        } catch (SQLException e) {
+            connection.rollback();
+            throw e;
+        } finally {
+            connection.setAutoCommit(previous);
+        }
     }
 
     /**
@@ -315,6 +378,7 @@ public final class StockRepository {
                 getFloat(rs, "ma20"),
                 getFloat(rs, "ma50"),
                 getFloat(rs, "ma200"),
+                getFloat(rs, "rsi14"),
                 getFloat(rs, "chandeMmt"),
                 getFloat(rs, "chalkinMF"));
     }
@@ -339,6 +403,7 @@ public final class StockRepository {
                             getFloat(rs, "ma20"),
                             getFloat(rs, "ma50"),
                             getFloat(rs, "ma200"),
+                            getFloat(rs, "rsi14"),
                             getFloat(rs, "chandeMmt"),
                             getFloat(rs, "chalkinMF"),
                             rs.getString("suggestedAction"),
@@ -402,6 +467,7 @@ public final class StockRepository {
                     row.put("date", rs.getString("date"));
                     row.put("close", getFloat(rs, "close"));
                     row.put("ma50", getFloat(rs, "ma50"));
+                    row.put("rsi14", getFloat(rs, "rsi14"));
                     row.put("chandeMmt", getFloat(rs, "chandeMmt"));
                     row.put("chalkinMF", getFloat(rs, "chalkinMF"));
                     row.put("suggestedAction", rs.getString("suggestedAction"));

@@ -90,6 +90,7 @@ public final class StockSummaryBuilder {
         summary.put("ma20", latest.ma20());
         summary.put("ma50", latest.ma50());
         summary.put("ma200", latest.ma200());
+        summary.put("rsi14", latest.rsi14());
         summary.put("chandeMmt", latest.chandeMmt());
         summary.put("chalkinMF", latest.chalkinMF());
         summary.put("closeVsMa20Pct", pctDiff(latest.close(), latest.ma20()));
@@ -115,6 +116,7 @@ public final class StockSummaryBuilder {
             bar.put("ma20", row.ma20());
             bar.put("ma50", row.ma50());
             bar.put("ma200", row.ma200());
+            bar.put("rsi14", row.rsi14());
             bar.put("chandeMmt", row.chandeMmt());
             bar.put("chalkinMF", row.chalkinMF());
             out.add(bar);

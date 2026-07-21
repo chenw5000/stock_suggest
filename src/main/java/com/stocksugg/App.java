@@ -9,8 +9,10 @@ import com.stocksugg.stock.GeminiStockAdvisor;
 import com.stocksugg.stock.GeminiSuggestion;
 import com.stocksugg.stock.MarketSession;
 import com.stocksugg.stock.StockDataImporter;
+import com.stocksugg.stock.StockRow;
 import com.stocksugg.stock.SuggestionBacktester;
 import com.stocksugg.stock.SuggestionStrategyOptimizer;
+import com.stocksugg.stock.TechnicalIndicators;
 import com.stocksugg.stock.TickerList;
 import com.stocksugg.web.WebServer;
 
@@ -18,8 +20,10 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 public class App {
@@ -224,6 +228,61 @@ public class App {
         adviseStocks(tickers);
     }
 
+    /**
+     * Recalculates Wilder RSI(14) from all stored closes for every ticker in the admin watchlist.
+     * Only the {@code rsi14} column is updated; OHLCV and suggestion fields are left unchanged.
+     */
+    public static void updateRsi14ForWatchlist() {
+        List<String> tickers = TickerList.loadFromAdmin();
+        System.out.println("Updating RSI(14) for watchlist: " + tickers);
+
+        try (Database db = new Database()) {
+            StockRepository repository = new StockRepository(db);
+            int totalUpdated = 0;
+
+            for (String ticker : tickers) {
+                try {
+                    List<StockRow> rows = repository.findAllBars(ticker);
+                    if (rows.isEmpty()) {
+                        System.out.println(ticker + ": no stored rows; skipped.");
+                        continue;
+                    }
+
+                    double[] closes = new double[rows.size()];
+                    for (int i = 0; i < rows.size(); i++) {
+                        closes[i] = rows.get(i).close();
+                    }
+                    Float[] values = TechnicalIndicators.relativeStrengthIndex(
+                            closes, TechnicalIndicators.RSI_PERIOD);
+
+                    Map<LocalDate, Float> valuesByDate = new LinkedHashMap<>();
+                    int populated = 0;
+                    for (int i = 0; i < rows.size(); i++) {
+                        valuesByDate.put(rows.get(i).date(), values[i]);
+                        if (values[i] != null) {
+                            populated++;
+                        }
+                    }
+
+                    int updated = repository.updateRsi14(ticker, valuesByDate);
+                    totalUpdated += updated;
+                    System.out.println(ticker + ": updated " + updated + " row(s); "
+                            + populated + " RSI value(s), "
+                            + (rows.size() - populated) + " warm-up null(s).");
+                } catch (Exception e) {
+                    System.err.println(ticker + ": RSI update failed: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+
+            System.out.println("RSI(14) watchlist update complete: "
+                    + totalUpdated + " row(s) updated.");
+        } catch (Exception e) {
+            System.err.println("RSI watchlist update failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     private static void runBacktest(
             String ticker,
             LocalDate from,
@@ -384,6 +443,11 @@ public class App {
         boolean backfill = argList.contains("--backfill");
         boolean backtest = argList.contains("--backtest");
         boolean optimize = argList.contains("--optimize");
+        boolean updateRsi = argList.contains("--update-rsi");
+
+        if (updateRsi) {
+            updateRsi14ForWatchlist();
+        }
 
         if (backfill) {
             String ticker = argValue(argList, "--ticker", "AAPL");
@@ -422,9 +486,10 @@ public class App {
             return;
         }
 
-        if (!runBatch && !backfill && !backtest && !optimize) {
+        if (!runBatch && !backfill && !backtest && !optimize && !updateRsi) {
             System.out.println("Nothing to run. Options:");
             System.out.println("  --batch              refresh Yahoo data + Gemini suggestions");
+            System.out.println("  --update-rsi         recalculate RSI(14) for all watchlist tickers");
             System.out.println("  --backfill           Gemini backfill for historical days");
             System.out.println("      --ticker=AAPL --from=2026-07-01 --to=2026-07-14");
             System.out.println("  --backtest           suggestion-driven long-only backtest");
