@@ -15,12 +15,18 @@ import com.stocksugg.stock.TickerList;
 import com.stocksugg.web.WebServer;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
 public class App {
+
+    private static final long BACKFILL_MONTH_WAIT_MILLIS = 2 * 60 * 1000L;
+
+    record DateRange(LocalDate from, LocalDate to) {}
 
     private static void refreshStockData(String ticker) {
         try (Database db = new Database()) {
@@ -87,9 +93,64 @@ public class App {
 
     /**
      * For trading days in [{@code from}, {@code to}] that already have a DB row for the ticker,
-     * ask Gemini in batched API calls (multiple asOf packages per request) and update those rows.
+     * split the interval into calendar months and backfill each month separately. Wait two minutes
+     * between months to let the Gemini API cool down.
      */
     private static void backfillSuggestions(String ticker, LocalDate from, LocalDate to) {
+        List<DateRange> ranges = monthlyRanges(from, to);
+        String symbol = ticker.toUpperCase(Locale.ROOT);
+        System.out.println("Backfill for " + symbol + " split into "
+                + ranges.size() + " monthly interval(s).");
+
+        for (int i = 0; i < ranges.size(); i++) {
+            DateRange range = ranges.get(i);
+            System.out.println("Monthly backfill " + (i + 1) + "/" + ranges.size()
+                    + ": " + range.from() + " to " + range.to());
+            backfillSuggestionsForRange(ticker, range.from(), range.to());
+
+            if (i < ranges.size() - 1) {
+                System.out.println("Waiting 2 minutes for Gemini cooldown...");
+                try {
+                    Thread.sleep(BACKFILL_MONTH_WAIT_MILLIS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    System.err.println("Backfill interrupted during cooldown; stopping.");
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Converts an inclusive date interval into calendar-month intervals. The first and last
+     * intervals are clipped to the requested dates.
+     */
+    static List<DateRange> monthlyRanges(LocalDate from, LocalDate to) {
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("from and to are required");
+        }
+        if (from.isAfter(to)) {
+            throw new IllegalArgumentException("from must be on or before to");
+        }
+
+        List<DateRange> ranges = new ArrayList<>();
+        LocalDate rangeStart = from;
+        while (!rangeStart.isAfter(to)) {
+            LocalDate endOfMonth = YearMonth.from(rangeStart).atEndOfMonth();
+            LocalDate rangeEnd = endOfMonth.isBefore(to) ? endOfMonth : to;
+            ranges.add(new DateRange(rangeStart, rangeEnd));
+            rangeStart = rangeEnd.plusDays(1);
+        }
+        return List.copyOf(ranges);
+    }
+
+    /**
+     * Performs one Gemini backfill call for one monthly interval.
+     */
+    private static void backfillSuggestionsForRange(
+            String ticker,
+            LocalDate from,
+            LocalDate to) {
         String symbol = ticker.toUpperCase();
         System.out.println("Backfilling Gemini suggestions for " + symbol
                 + " from " + from + " to " + to + " ...");

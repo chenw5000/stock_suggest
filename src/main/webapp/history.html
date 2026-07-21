@@ -20,6 +20,12 @@
       </form>
     </header>
     <p class="error" id="error" hidden></p>
+    <section class="chart-panel" id="history-chart-wrap" hidden>
+      <h2 class="section-title" id="history-chart-title">HLOC — last 6 months</h2>
+      <div class="chart-canvas-box">
+        <canvas id="history-chart"></canvas>
+      </div>
+    </section>
     <div class="table-wrap" id="table-wrap">
       <p class="empty" id="empty" hidden>No history rows found for this ticker.</p>
       <table id="history-table" hidden>
@@ -47,6 +53,7 @@
       · <a id="suggest-link" href="suggest.html">Suggestions</a>
     </p>
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
   <script src="js/history.js"></script>
 </body>
 </html>

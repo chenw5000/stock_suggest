@@ -61,6 +61,14 @@ public final class StockRepository {
             ORDER BY "date"
             """;
 
+    private static final String SELECT_BARS_IN_RANGE = """
+            SELECT ticker, "date", open, high, low, close,
+                   ma5, ma10, ma20, ma50, ma200, chandeMmt, chalkinMF
+            FROM stock
+            WHERE ticker = ? AND "date" >= ? AND "date" <= ?
+            ORDER BY "date"
+            """;
+
     private static final String SELECT_BACKTEST_DAYS = """
             SELECT "date", close, suggestedAction, confidence
             FROM stock
@@ -275,6 +283,23 @@ public final class StockRepository {
             }
         }
         return days;
+    }
+
+    /** OHLC bars for ticker in [{@code from}, {@code to}], ascending by date. */
+    public List<StockRow> findBarsInRange(String ticker, LocalDate from, LocalDate to)
+            throws SQLException {
+        List<StockRow> rows = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_BARS_IN_RANGE)) {
+            ps.setString(1, ticker.toUpperCase());
+            ps.setString(2, from.toString());
+            ps.setString(3, to.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(readStockRow(rs));
+                }
+            }
+        }
+        return rows;
     }
 
     private static StockRow readStockRow(ResultSet rs) throws SQLException {

@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
         "/health",
         "/api/suggest/*",
         "/api/history/*",
+        "/api/chart/*",
         "/api/admin",
         "/api/admin/*",
         "/api/batch",
@@ -48,6 +49,11 @@ public final class StockSuggServlet extends HttpServlet {
 
         if ("/api/history".equals(path)) {
             writeHistoryApi(req, resp);
+            return;
+        }
+
+        if ("/api/chart".equals(path)) {
+            writeChartApi(req, resp);
             return;
         }
 
@@ -222,6 +228,29 @@ public final class StockSuggServlet extends HttpServlet {
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Failed to load history: " + e.getMessage()));
+        }
+    }
+
+    private static void writeChartApi(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String ticker = extractPathSegment(req.getPathInfo());
+        if (ticker == null) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
+                    "error", "Missing ticker. Use /api/chart/{TICKER}?months=6"));
+            return;
+        }
+
+        int months = parsePositiveInt(req.getParameter("months"), ChartApi.DEFAULT_MONTHS);
+
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(ChartApi.closesJson(ticker, months));
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to load chart data: " + e.getMessage()));
         }
     }
 

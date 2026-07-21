@@ -1,6 +1,7 @@
 (function () {
   const PAGE_SIZE = 10;
   const MAIN_COL_COUNT = 11;
+  const CHART_MONTHS = 6;
 
   const params = new URLSearchParams(window.location.search);
   const tickerInput = document.getElementById("ticker");
@@ -11,6 +12,10 @@
   const tbody = document.getElementById("history-body");
   const pagination = document.getElementById("pagination");
   const suggestLink = document.getElementById("suggest-link");
+  const chartWrap = document.getElementById("history-chart-wrap");
+  const chartTitle = document.getElementById("history-chart-title");
+  const chartCanvas = document.getElementById("history-chart");
+  let priceChart = null;
 
   const ticker = (params.get("ticker") || "").trim().toUpperCase();
   let page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
@@ -186,6 +191,123 @@
     });
   }
 
+  function chartApiUrl(symbol) {
+    const url = new URL(
+      "api/chart/" + encodeURIComponent(symbol),
+      window.location.href
+    );
+    url.searchParams.set("months", String(CHART_MONTHS));
+    return url.toString();
+  }
+
+  function renderChart(data) {
+    const points = (data && data.points) || [];
+    if (points.length === 0 || typeof Chart === "undefined") {
+      chartWrap.hidden = true;
+      return;
+    }
+    chartWrap.hidden = false;
+    chartTitle.textContent =
+      data.ticker + " HLOC — last " + CHART_MONTHS + " months";
+
+    const styles = getComputedStyle(document.documentElement);
+    const muted = styles.getPropertyValue("--muted").trim() || "#8b98a5";
+    const line = styles.getPropertyValue("--line").trim() || "#2a3542";
+    const upColor = "#2eb872";
+    const downColor = "#e05252";
+
+    const candleColors = points.map((p) =>
+      p.close >= p.open ? upColor : downColor
+    );
+
+    const highest = Math.max(...points.map((p) => p.high));
+    const lowest = Math.min(...points.map((p) => p.low));
+
+    if (priceChart) {
+      priceChart.destroy();
+    }
+    // Candlesticks from two overlapping floating-bar datasets:
+    // a thin high-low wick behind a thick open-close body.
+    priceChart = new Chart(chartCanvas, {
+      type: "bar",
+      data: {
+        labels: points.map((p) => p.date),
+        datasets: [
+          {
+            label: "wick",
+            data: points.map((p) => [p.low, p.high]),
+            backgroundColor: candleColors,
+            grouped: false,
+            barPercentage: 0.16,
+            categoryPercentage: 1.0,
+            order: 2
+          },
+          {
+            label: "body",
+            data: points.map((p) => [p.open, p.close]),
+            backgroundColor: candleColors,
+            grouped: false,
+            barPercentage: 0.72,
+            categoryPercentage: 1.0,
+            // Doji days (open == close) would otherwise render as invisible bars.
+            minBarLength: 2,
+            order: 1
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            filter: (item) => item.datasetIndex === 1,
+            callbacks: {
+              label: (ctx) => {
+                const p = points[ctx.dataIndex];
+                return [
+                  "Open:  " + formatNum(p.open),
+                  "High:  " + formatNum(p.high),
+                  "Low:   " + formatNum(p.low),
+                  "Close: " + formatNum(p.close)
+                ];
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: {
+              color: muted,
+              maxTicksLimit: 8,
+              maxRotation: 0
+            },
+            grid: { display: false }
+          },
+          y: {
+            min: lowest * 0.9,
+            max: highest * 1.1,
+            ticks: {
+              color: muted,
+              callback: (value) => formatNum(value)
+            },
+            grid: { color: line }
+          }
+        }
+      }
+    });
+  }
+
+  function loadChart(symbol) {
+    fetch(chartApiUrl(symbol), { headers: { Accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => renderChart(data))
+      .catch(() => {
+        chartWrap.hidden = true;
+      });
+  }
+
   function renderPagination(data) {
     const totalPages = data.totalPages || 0;
     const current = data.page || 1;
@@ -239,6 +361,8 @@
   }
 
   meta.textContent = ticker + " · loading…";
+
+  loadChart(ticker);
 
   fetch(apiUrl(ticker, page), { headers: { Accept: "application/json" } })
     .then(async (response) => {

@@ -104,6 +104,26 @@ h1 {
   background: color-mix(in srgb, var(--panel) 92%, black);
 }
 
+.chart-panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 92%, black);
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+}
+
+.chart-panel .section-title {
+  margin-bottom: 0.6rem;
+}
+
+/* Chart.js needs a positioned, fixed-height box or the responsive canvas grows unbounded. */
+.chart-canvas-box {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  max-height: 300px;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;

@@ -71,6 +71,20 @@ public final class WebServer {
                 }
             });
 
+            config.routes.get("/api/chart/{ticker}", ctx -> {
+                String ticker = ctx.pathParam("ticker");
+                int months = parsePositiveInt(ctx.queryParam("months"), ChartApi.DEFAULT_MONTHS);
+                try {
+                    ctx.contentType("application/json")
+                            .result(ChartApi.closesJson(ticker, months));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Failed to load chart data: " + e.getMessage()));
+                }
+            });
+
             config.routes.get("/api/admin", ctx -> {
                 try {
                     ctx.contentType("application/json").result(AdminApi.listJson());

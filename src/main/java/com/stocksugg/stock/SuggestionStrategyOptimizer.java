@@ -2,7 +2,10 @@ package com.stocksugg.stock;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Grid-searches {@link BacktestStrategy} parameters for higher return on a fixed day series.
@@ -83,11 +86,35 @@ public final class SuggestionStrategyOptimizer {
                 .reversed()
                 .thenComparingInt(c -> c.result().trades().size()));
 
-        List<Candidate> top = all.subList(0, Math.min(topN, all.size()));
+        // Many parameter combos are behaviorally identical (e.g. BUY_ALL ignores parts;
+        // SELL_PART == SELL_ALL when only one lot is held). Keep one candidate per
+        // distinct trade outcome so the top list shows genuinely different strategies.
+        Set<String> seenOutcomes = new HashSet<>();
+        List<Candidate> distinct = new ArrayList<>();
+        for (Candidate candidate : all) {
+            if (seenOutcomes.add(outcomeSignature(candidate.result()))) {
+                distinct.add(candidate);
+                if (distinct.size() == topN) {
+                    break;
+                }
+            }
+        }
+
         return new Report(
                 SuggestionBacktester.buyAndHold(startingCash, days),
                 SuggestionBacktester.run(startingCash, days),
                 SuggestionBacktester.runParts(startingCash, 4, days),
-                List.copyOf(top));
+                List.copyOf(distinct));
+    }
+
+    /**
+     * Identifies a result by its actual fills (date + share delta), ignoring skip events and
+     * event labels — SELL_PART and SELL_ALL on a single lot are the same economic outcome.
+     */
+    private static String outcomeSignature(SuggestionBacktester.Result result) {
+        return result.trades().stream()
+                .filter(t -> t.sharesDelta() != 0)
+                .map(t -> t.day().date() + ":" + t.sharesDelta())
+                .collect(Collectors.joining("|"));
     }
 }
