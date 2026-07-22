@@ -1,6 +1,7 @@
 package com.stocksugg.web;
 
 import com.stocksugg.App;
+import com.stocksugg.stock.BatchScheduler;
 import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
 import io.javalin.http.staticfiles.Location;
@@ -165,6 +166,7 @@ public final class WebServer {
             });
         }).start(port);
 
+        BatchScheduler.start();
         System.out.println("Javalin listening at http://localhost:" + port + "/");
         System.out.println("Suggestions UI: http://localhost:" + port + "/suggest.html?date=yyyy-MM-dd");
         System.out.println("Suggestions API: http://localhost:" + port + "/api/suggest/yyyy-MM-dd");

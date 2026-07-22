@@ -117,6 +117,8 @@ curl.exe -X PUT -H "Content-Type: application/json" `
 
 Also set `GEMINI_API_KEY` in admin (same page) before running batch suggestions.
 
+Set **`REFRESH_TIME`** (Pacific, 24-hour `HH:mm`, default `16:00`) to choose when the daily automatic batch may run. The web app seeds this key on startup if missing; edit it like any other admin property. A background scheduler (Tomcat WAR or `--embedded`) checks about every 15 seconds and, once per calendar day at or after that minute, calls the same Yahoo refresh + Gemini job as **Run batch job**.
+
 After changing `TICKERS`, run a batch so new symbols get historical Yahoo data (first time: up to ~2 years) and suggestions.
 
 **Import safety:** refreshing never overwrites existing daily rows. New Yahoo data is inserted only for dates missing in the DB, so prior OHLCV and Gemini fields (thesis, risks, etc.) stay intact.
@@ -364,12 +366,13 @@ Treat optimized winners as **hypotheses** to retest on other tickers/dates; they
 | Area | Role |
 |------|------|
 | `App` | CLI: `--batch`, `--backfill`, `--update-rsi`, `--backtest`, `--optimize`, `--embedded` |
+| `BatchScheduler` / `RefreshTime` | Daily auto-batch at admin `REFRESH_TIME` (Pacific) |
 | `StockDataImporter` / Yahoo client | Download + indicator enrichment |
 | `StockRepository` | Postgres persistence (insert missing dates only) |
 | `GeminiStockAdvisor` | Prompt Gemini and write suggestion columns |
 | `SuggestionBacktester` / `SuggestionStrategyOptimizer` | Suggestion-driven backtest and parameter search |
 | `webapp/` + `StockSuggServlet` | Tomcat UI and JSON APIs |
-| `admin` table | `TICKERS`, `GEMINI_API_KEY`, other config |
+| `admin` table | `TICKERS`, `GEMINI_API_KEY`, `REFRESH_TIME`, other config |
 
 ---
 
