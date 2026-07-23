@@ -4,6 +4,8 @@ StockSugg downloads daily OHLCV data from Yahoo Finance, computes technical indi
 
 This is a research / educational tool, not investment advice.
 
+![Gemini suggestions for 2026-07-22](docs/images/suggest-2026-07-22.png)
+
 ---
 
 ## Prerequisites
