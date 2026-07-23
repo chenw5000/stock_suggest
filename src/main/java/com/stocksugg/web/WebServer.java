@@ -153,6 +153,26 @@ public final class WebServer {
                 }
             });
 
+            config.routes.get("/api/backtest", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(BacktestApi.tickersJson());
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Failed to load tickers: " + e.getMessage()));
+                }
+            });
+
+            config.routes.post("/api/backtest", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(BacktestApi.runJson(ctx.body()));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Backtest failed: " + e.getMessage()));
+                }
+            });
+
             config.routes.get("/suggest/{date}", ctx -> {
                 String rawDate = ctx.pathParam("date");
                 try {

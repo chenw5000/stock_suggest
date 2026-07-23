@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
         "/api/admin",
         "/api/admin/*",
         "/api/batch",
+        "/api/backtest",
         "/suggest/*"
 })
 public final class StockSuggServlet extends HttpServlet {
@@ -67,6 +68,11 @@ public final class StockSuggServlet extends HttpServlet {
             return;
         }
 
+        if ("/api/backtest".equals(path)) {
+            writeBacktestTickers(resp);
+            return;
+        }
+
         if ("/suggest".equals(path)) {
             redirectToSuggestPage(req, resp);
         }
@@ -86,6 +92,10 @@ public final class StockSuggServlet extends HttpServlet {
         String path = req.getServletPath();
         if ("/api/batch".equals(path)) {
             writeBatchStart(resp);
+            return;
+        }
+        if ("/api/backtest".equals(path)) {
+            writeBacktestRun(req, resp);
             return;
         }
         if ("/api/admin".equals(path)) {
@@ -177,6 +187,32 @@ public final class StockSuggServlet extends HttpServlet {
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Failed to read batch status: " + e.getMessage()));
+        }
+    }
+
+    private static void writeBacktestTickers(HttpServletResponse resp) throws IOException {
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(BacktestApi.tickersJson());
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to load tickers: " + e.getMessage()));
+        }
+    }
+
+    private static void writeBacktestRun(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String body = req.getReader().lines().collect(Collectors.joining("\n"));
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(BacktestApi.runJson(body));
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Backtest failed: " + e.getMessage()));
         }
     }
 

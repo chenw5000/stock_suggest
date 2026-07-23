@@ -78,6 +78,7 @@ Copy-Item -Force target\stocksugg.war C:\path\to\apache-tomcat-10.1.x\webapps\st
 - Home: `http://localhost:8080/stocksugg/` (port may differ; this project often uses **7070**)
 - Suggestions: `…/suggest.html`
 - History: `…/history.html?ticker=AAPL`
+- Backtest: `…/backtest.html`
 - Admin: `…/admin.html`
 - Health: `…/health`
 
@@ -228,14 +229,55 @@ Each row stores Gemini’s **`suggestedAction`** — a headline label for what t
 
 ## Backtesting
 
-StockSugg can simulate a long-only account using stored daily `close` prices plus Gemini `suggestedAction` / `confidence`. Two CLI modes:
+StockSugg can simulate a long-only account using stored daily `close` prices plus Gemini `suggestedAction` / `confidence`. You can run a single customized strategy from the web UI, or use CLI modes for fixed rules and grid search:
 
-| Mode | Flag | Purpose |
-|------|------|---------|
-| Fixed strategy | `--backtest` | Run one rule set (`all-in` or equal `parts`) |
+| Mode | How | Purpose |
+|------|-----|---------|
+| Web UI | `backtest.html` | Configure one candidate (parts, confidence, SELL/AVOID rules) and view trades in the browser |
+| Fixed strategy | `--backtest` | Run one rule set (`all-in` or equal `parts`) from the CLI |
 | Strategy search | `--optimize` | Grid-search parts, confidence floors, and how BUY/SELL/HOLD/AVOID map to trade intents |
 
 Fills are **whole shares at that day's close** (no commissions/slippage). Results are research-only and **in-sample** when you optimize on the same window you evaluate.
+
+### Web UI (`backtest.html`)
+
+Open `…/backtest.html` (linked from the home page and other UI pages). The form runs **one** customized strategy against data already in Postgres — the same engine as the CLI (`SuggestionBacktester`), not a full `--optimize` grid search.
+
+**Controls**
+
+| Control | Meaning |
+|---------|---------|
+| Ticker | Watch-list symbol from admin `TICKERS` |
+| Starting cash | Initial cash (e.g. `10000`) |
+| From / To | Inclusive date range |
+| Parts (buckets) | Split cash into N equal budgets; `1` ≈ all-in sizing |
+| Buy confidence ≥ | Minimum Gemini confidence to execute a BUY |
+| Sell confidence ≥ | Minimum confidence to execute a sell intent |
+| Sell on SELL | If checked, SELL sells one part (or all when parts = 1) |
+| Sell on AVOID (one part) | If checked, AVOID sells one part (or all when parts = 1) |
+| Sell ALL when AVOID | If checked, AVOID always exits the **entire** position (`SELL_ALL`), even with multiple parts |
+
+**Results**
+
+- Summary: ending equity (green if better than buy & hold, red if worse), return, buys/sells/skipped buys, ending cash/shares, and a buy & hold baseline
+- Trade list: each fill with date, event, shares, price, cash, position, equity, signal, and confidence
+
+**API**
+
+```text
+GET  /api/backtest          # watch-list tickers for the dropdown
+POST /api/backtest          # run one candidate (JSON body)
+```
+
+Example:
+
+```powershell
+curl.exe -X POST -H "Content-Type: application/json" `
+  -d "{\"ticker\":\"GOOGL\",\"cash\":10000,\"from\":\"2026-01-01\",\"to\":\"2026-07-21\",\"parts\":4,\"minBuyConfidence\":0.7,\"minSellConfidence\":0,\"sellOnSell\":true,\"sellOnAvoid\":true,\"sellAllOnAvoid\":true}" `
+  http://localhost:7070/stocksugg/api/backtest
+```
+
+Prepare data the same way as for CLI backtests (Yahoo bars + Gemini suggestions in range) before using the page.
 
 ### How to prepare the data
 
@@ -373,6 +415,7 @@ Treat optimized winners as **hypotheses** to retest on other tickers/dates; they
 | `StockRepository` | Postgres persistence (insert missing dates only) |
 | `GeminiStockAdvisor` | Prompt Gemini and write suggestion columns |
 | `SuggestionBacktester` / `SuggestionStrategyOptimizer` | Suggestion-driven backtest and parameter search |
+| `backtest.html` / `BacktestApi` | Web UI to run one customized backtest candidate |
 | `webapp/` + `StockSuggServlet` | Tomcat UI and JSON APIs |
 | `admin` table | `TICKERS`, `GEMINI_API_KEY`, `REFRESH_TIME`, other config |
 
