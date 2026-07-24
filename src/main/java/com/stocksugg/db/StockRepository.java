@@ -541,6 +541,32 @@ public final class StockRepository {
         }
     }
 
+    /**
+     * Nearest calendar date in {@code stock} strictly before ({@code direction < 0})
+     * or after ({@code direction > 0}) {@code from}. Skips weekends/holidays with no rows.
+     */
+    public Optional<LocalDate> findAdjacentTradingDate(LocalDate from, int direction)
+            throws SQLException {
+        if (direction == 0) {
+            throw new IllegalArgumentException("direction must be negative (prev) or positive (next)");
+        }
+        String sql = direction < 0
+                ? "SELECT MAX(\"date\") FROM stock WHERE \"date\" < ?"
+                : "SELECT MIN(\"date\") FROM stock WHERE \"date\" > ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, from.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String value = rs.getString(1);
+                    if (value != null && !value.isBlank()) {
+                        return Optional.of(LocalDate.parse(value));
+                    }
+                }
+                return Optional.empty();
+            }
+        }
+    }
+
     private static Float getFloat(ResultSet rs, String column) throws SQLException {
         float value = rs.getFloat(column);
         return rs.wasNull() ? null : value;

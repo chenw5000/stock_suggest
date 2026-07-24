@@ -44,7 +44,11 @@ public final class StockSuggServlet extends HttpServlet {
         }
 
         if ("/api/suggest".equals(path)) {
-            writeSuggestApi(req.getPathInfo(), resp);
+            if (isAdjacentSuggestPath(req.getPathInfo())) {
+                writeAdjacentSuggestApi(req, resp);
+            } else {
+                writeSuggestApi(req.getPathInfo(), resp);
+            }
             return;
         }
 
@@ -213,6 +217,61 @@ public final class StockSuggServlet extends HttpServlet {
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Backtest failed: " + e.getMessage()));
+        }
+    }
+
+    private static boolean isAdjacentSuggestPath(String pathInfo) {
+        String segment = extractPathSegment(pathInfo);
+        return "adjacent".equalsIgnoreCase(segment);
+    }
+
+    private static void writeAdjacentSuggestApi(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String rawDate = req.getParameter("date");
+        if (rawDate == null || rawDate.isBlank()) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
+                    "error", "Missing date. Use /api/suggest/adjacent?date=yyyy-MM-dd&dir=-1."));
+            return;
+        }
+
+        final LocalDate date;
+        try {
+            date = LocalDate.parse(rawDate.trim());
+        } catch (DateTimeParseException ex) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
+                    "error", "Invalid date '" + rawDate + "'. Use yyyy-MM-dd."));
+            return;
+        }
+
+        String rawDir = req.getParameter("dir");
+        if (rawDir == null || rawDir.isBlank()) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
+                    "error", "Missing dir. Use dir=-1 (previous) or dir=1 (next)."));
+            return;
+        }
+        final int direction;
+        try {
+            direction = Integer.parseInt(rawDir.trim());
+        } catch (NumberFormatException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
+                    "error", "Invalid dir '" + rawDir + "'. Use -1 or 1."));
+            return;
+        }
+        if (direction == 0) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
+                    "error", "dir must be negative (previous) or positive (next)."));
+            return;
+        }
+
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(SuggestApi.adjacentDateJson(date, direction));
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to resolve adjacent date: " + e.getMessage()));
         }
     }
 

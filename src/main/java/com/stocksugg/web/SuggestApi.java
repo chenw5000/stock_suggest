@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Shared JSON helpers for suggestion API responses. */
 public final class SuggestApi {
@@ -21,6 +22,21 @@ public final class SuggestApi {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private SuggestApi() {}
+
+    /**
+     * Nearest date in {@code stock} before/after {@code from} ({@code direction} &lt; 0 prev, &gt; 0 next).
+     */
+    public static String adjacentDateJson(LocalDate from, int direction) throws Exception {
+        try (Database db = new Database()) {
+            StockRepository repository = new StockRepository(db);
+            Optional<LocalDate> adjacent = repository.findAdjacentTradingDate(from, direction);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("from", from.toString());
+            body.put("dir", direction < 0 ? -1 : 1);
+            body.put("date", adjacent.map(LocalDate::toString).orElse(null));
+            return MAPPER.writeValueAsString(body);
+        }
+    }
 
     public static String suggestionsJson(LocalDate date) throws Exception {
         try (Database db = new Database()) {

@@ -38,6 +38,51 @@ public final class WebServer {
                     "service", "StockSugg",
                     "port", port)));
 
+            config.routes.get("/api/suggest/adjacent", ctx -> {
+                String rawDate = ctx.queryParam("date");
+                if (rawDate == null || rawDate.isBlank()) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of(
+                            "error", "Missing date. Use /api/suggest/adjacent?date=yyyy-MM-dd&dir=-1."));
+                    return;
+                }
+                final LocalDate date;
+                try {
+                    date = LocalDate.parse(rawDate.trim());
+                } catch (DateTimeParseException ex) {
+                    ctx.status(HttpStatus.BAD_REQUEST)
+                            .json(Map.of("error", "Invalid date '" + rawDate + "'. Use yyyy-MM-dd."));
+                    return;
+                }
+                String rawDir = ctx.queryParam("dir");
+                if (rawDir == null || rawDir.isBlank()) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of(
+                            "error", "Missing dir. Use dir=-1 (previous) or dir=1 (next)."));
+                    return;
+                }
+                final int direction;
+                try {
+                    direction = Integer.parseInt(rawDir.trim());
+                } catch (NumberFormatException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST)
+                            .json(Map.of("error", "Invalid dir '" + rawDir + "'. Use -1 or 1."));
+                    return;
+                }
+                if (direction == 0) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of(
+                            "error", "dir must be negative (previous) or positive (next)."));
+                    return;
+                }
+                try {
+                    ctx.contentType("application/json")
+                            .result(SuggestApi.adjacentDateJson(date, direction));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to resolve adjacent date: " + e.getMessage()));
+                }
+            });
+
             config.routes.get("/api/suggest/{date}", ctx -> {
                 String rawDate = ctx.pathParam("date");
                 final LocalDate date;

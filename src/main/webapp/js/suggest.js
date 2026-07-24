@@ -9,15 +9,50 @@
   const table = document.getElementById("suggest-table");
   const tbody = document.getElementById("suggest-body");
 
-  const date = params.get("date") || new Date().toISOString().slice(0, 10);
+  /** Local yyyy-MM-dd; before 14:00 use yesterday (suggestions usually not ready yet). */
+  function defaultSuggestDate(now = new Date()) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (now.getHours() < 14) {
+      d.setDate(d.getDate() - 1);
+    }
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + day;
+  }
+
+  const date = params.get("date") || defaultSuggestDate();
   dateInput.value = date;
   document.title = "StockSugg — " + date;
 
+  /** Resolve prev/next trading day from DB (skips weekends/holidays with no stock rows). */
   function shiftDate(isoDate, deltaDays) {
-    const parts = isoDate.split("-").map(Number);
-    const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-    d.setUTCDate(d.getUTCDate() + deltaDays);
-    return d.toISOString().slice(0, 10);
+    const url = new URL("api/suggest/adjacent", window.location.href);
+    url.searchParams.set("date", isoDate);
+    url.searchParams.set("dir", deltaDays > 0 ? "1" : "-1");
+    return fetch(url.toString(), { headers: { Accept: "application/json" } }).then(
+      async (response) => {
+        const text = await response.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_) {
+          /* non-JSON error body */
+        }
+        if (!response.ok) {
+          const msg = (data && data.error) || text || ("HTTP " + response.status);
+          throw new Error(msg);
+        }
+        if (!data || !data.date) {
+          throw new Error(
+            deltaDays > 0
+              ? "No later trading day found in the database."
+              : "No earlier trading day found in the database."
+          );
+        }
+        return data.date;
+      }
+    );
   }
 
   function goToDate(isoDate) {
@@ -26,11 +61,23 @@
     window.location.href = url.pathname + url.search;
   }
 
-  document.getElementById("prev-day").addEventListener("click", () => {
-    goToDate(shiftDate(dateInput.value || date, -1));
+  function navigateAdjacent(deltaDays, button) {
+    const from = dateInput.value || date;
+    button.disabled = true;
+    shiftDate(from, deltaDays)
+      .then(goToDate)
+      .catch((err) => {
+        button.disabled = false;
+        errorEl.hidden = false;
+        errorEl.textContent = err.message;
+      });
+  }
+
+  document.getElementById("prev-day").addEventListener("click", (event) => {
+    navigateAdjacent(-1, event.currentTarget);
   });
-  document.getElementById("next-day").addEventListener("click", () => {
-    goToDate(shiftDate(dateInput.value || date, 1));
+  document.getElementById("next-day").addEventListener("click", (event) => {
+    navigateAdjacent(1, event.currentTarget);
   });
 
   function apiUrl(d) {
