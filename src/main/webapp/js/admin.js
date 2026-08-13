@@ -76,7 +76,7 @@
         '<tr class="main-row" data-key="' + encodeURIComponent(key) + '">' +
         '<td class="admin-key">' + escapeHtml(key) + "</td>" +
         '<td class="admin-value-cell">' +
-        '<input type="text" class="admin-value-input" maxlength="155" value="' +
+        '<input type="text" class="admin-value-input" maxlength="4000" value="' +
         escapeHtml(value) +
         '">' +
         "</td>" +

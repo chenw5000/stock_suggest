@@ -38,6 +38,16 @@ public final class WebServer {
                     "service", "StockSugg",
                     "port", port)));
 
+            config.routes.get("/api/tuning-params", ctx -> {
+                try {
+                    ctx.contentType("application/json")
+                            .result(SuggestApi.tuningParamsJson());
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to load tuning params: " + e.getMessage()));
+                }
+            });
+
             config.routes.get("/api/suggest/adjacent", ctx -> {
                 String rawDate = ctx.queryParam("date");
                 if (rawDate == null || rawDate.isBlank()) {
@@ -93,9 +103,10 @@ public final class WebServer {
                             .json(Map.of("error", "Invalid date '" + rawDate + "'. Use yyyy-MM-dd."));
                     return;
                 }
+                long paramId = parsePositiveLong(ctx.queryParam("param"), 1L);
                 try {
                     ctx.contentType("application/json")
-                            .result(SuggestApi.suggestionsJson(date));
+                            .result(SuggestApi.suggestionsJson(date, paramId));
                 } catch (Exception e) {
                     ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .json(Map.of("error", "Failed to load suggestions: " + e.getMessage()));
@@ -106,9 +117,10 @@ public final class WebServer {
                 String ticker = ctx.pathParam("ticker");
                 int page = parsePositiveInt(ctx.queryParam("page"), 1);
                 int pageSize = parsePositiveInt(ctx.queryParam("pageSize"), HistoryApi.DEFAULT_PAGE_SIZE);
+                long paramId = parsePositiveLong(ctx.queryParam("param"), 1L);
                 try {
                     ctx.contentType("application/json")
-                            .result(HistoryApi.historyJson(ticker, page, pageSize));
+                            .result(HistoryApi.historyJson(ticker, page, pageSize, paramId));
                 } catch (IllegalArgumentException e) {
                     ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
                 } catch (Exception e) {
@@ -249,6 +261,18 @@ public final class WebServer {
         }
         try {
             int value = Integer.parseInt(raw.trim());
+            return value < 1 ? defaultValue : value;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    private static long parsePositiveLong(String raw, long defaultValue) {
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            long value = Long.parseLong(raw.trim());
             return value < 1 ? defaultValue : value;
         } catch (NumberFormatException e) {
             return defaultValue;

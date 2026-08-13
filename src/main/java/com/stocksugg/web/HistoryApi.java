@@ -15,6 +15,11 @@ public final class HistoryApi {
     private HistoryApi() {}
 
     public static String historyJson(String ticker, int page, int pageSize) throws Exception {
+        return historyJson(ticker, page, pageSize, 1L);
+    }
+
+    public static String historyJson(String ticker, int page, int pageSize, long paramId)
+            throws Exception {
         String symbol = ticker == null ? "" : ticker.trim().toUpperCase();
         if (symbol.isEmpty()) {
             throw new IllegalArgumentException("ticker is required");
@@ -30,10 +35,12 @@ public final class HistoryApi {
             StockRepository repository = new StockRepository(db);
             int totalCount = repository.countByTicker(symbol);
             int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
-            List<Map<String, Object>> rows = repository.findHistoryPage(symbol, page, pageSize);
+            List<Map<String, Object>> rows =
+                    repository.findHistoryPage(symbol, page, pageSize, paramId);
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("ticker", symbol);
+            body.put("paramId", paramId);
             body.put("page", page);
             body.put("pageSize", pageSize);
             body.put("totalCount", totalCount);

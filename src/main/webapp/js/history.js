@@ -5,6 +5,7 @@
 
   const params = new URLSearchParams(window.location.search);
   const tickerInput = document.getElementById("ticker");
+  const DEFAULT_PARAM_ID = "1";
   const meta = document.getElementById("meta");
   const errorEl = document.getElementById("error");
   const emptyEl = document.getElementById("empty");
@@ -20,7 +21,9 @@
   const ticker = (params.get("ticker") || "").trim().toUpperCase();
   let page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
 
-  tickerInput.value = ticker;
+  if (tickerInput) {
+    tickerInput.value = ticker;
+  }
   if (ticker) {
     document.title = "StockSugg — " + ticker + " history";
   }
@@ -32,6 +35,7 @@
     );
     url.searchParams.set("page", String(pageNum));
     url.searchParams.set("pageSize", String(PAGE_SIZE));
+    url.searchParams.set("param", DEFAULT_PARAM_ID);
     return url.toString();
   }
 
@@ -353,48 +357,56 @@
     pagination.hidden = true;
   }
 
+  function setSuggestLink() {
+    if (!suggestLink) {
+      return;
+    }
+    // Resolve against the current page so Tomcat context path (/stocksugg/) is kept.
+    const url = new URL("suggest.html", window.location.href);
+    suggestLink.href = url.pathname + url.search;
+  }
+
   if (!ticker) {
     meta.textContent = "Enter a ticker to view recent history.";
     emptyEl.hidden = false;
     emptyEl.textContent = "Choose a ticker above to load history.";
-    return;
+    setSuggestLink();
+  } else {
+    meta.textContent = ticker + " · loading…";
+    loadChart(ticker);
+
+    fetch(apiUrl(ticker, page), { headers: { Accept: "application/json" } })
+      .then(async (response) => {
+        const text = await response.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_) {
+          /* non-JSON error body */
+        }
+        if (!response.ok) {
+          const msg = (data && data.error) || text || ("HTTP " + response.status);
+          throw new Error(msg);
+        }
+        return data;
+      })
+      .then((data) => {
+        errorEl.hidden = true;
+        const from = data.totalCount === 0 ? 0 : (data.page - 1) * data.pageSize + 1;
+        const to = Math.min(data.page * data.pageSize, data.totalCount);
+        meta.textContent =
+          data.ticker +
+          " · " +
+          data.totalCount +
+          " day(s)" +
+          (data.totalCount === 0 ? "" : " · showing " + from + "–" + to);
+        setSuggestLink();
+        renderRows(data.rows || []);
+        renderPagination(data);
+      })
+      .catch((err) => {
+        showError("Failed to load history: " + err.message);
+        meta.textContent = ticker;
+      });
   }
-
-  meta.textContent = ticker + " · loading…";
-
-  loadChart(ticker);
-
-  fetch(apiUrl(ticker, page), { headers: { Accept: "application/json" } })
-    .then(async (response) => {
-      const text = await response.text();
-      let data = null;
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch (_) {
-        /* non-JSON error body */
-      }
-      if (!response.ok) {
-        const msg = (data && data.error) || text || ("HTTP " + response.status);
-        throw new Error(msg);
-      }
-      return data;
-    })
-    .then((data) => {
-      errorEl.hidden = true;
-      const from = data.totalCount === 0 ? 0 : (data.page - 1) * data.pageSize + 1;
-      const to = Math.min(data.page * data.pageSize, data.totalCount);
-      meta.textContent =
-        data.ticker +
-        " · " +
-        data.totalCount +
-        " day(s)" +
-        (data.totalCount === 0 ? "" : " · showing " + from + "–" + to);
-      suggestLink.href = "suggest.html";
-      renderRows(data.rows || []);
-      renderPagination(data);
-    })
-    .catch((err) => {
-      showError("Failed to load history: " + err.message);
-      meta.textContent = ticker;
-    });
 })();

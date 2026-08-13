@@ -29,6 +29,10 @@ import java.util.Optional;
 public class App {
 
     private static final long BACKFILL_MONTH_WAIT_MILLIS = 2 * 60 * 1000L;
+    /** Gemini daily advice: tickers per API call. */
+    private static final int BATCH_ADVICE_CHUNK_SIZE = 10;
+    /** Pause between Gemini advice chunks to avoid rate limits. */
+    private static final long BATCH_ADVICE_COOLDOWN_MILLIS = 60_000L;
 
     record DateRange(LocalDate from, LocalDate to) {}
 
@@ -76,19 +80,55 @@ public class App {
         }
     }
 
-    private static void adviseStocks(List<String> tickers) {
+    private static void adviseStocks(List<String> tickers, long paramId) {
+        if (tickers == null || tickers.isEmpty()) {
+            System.out.println("No tickers to advise; skipping Gemini batch.");
+            return;
+        }
+
+        int totalSaved = 0;
+        int chunkCount = (tickers.size() + BATCH_ADVICE_CHUNK_SIZE - 1) / BATCH_ADVICE_CHUNK_SIZE;
+        System.out.println("Requesting Gemini suggestions for " + tickers.size()
+                + " ticker(s) in " + chunkCount + " chunk(s) of up to "
+                + BATCH_ADVICE_CHUNK_SIZE + " (param_id=" + paramId + ") ...");
+
         try (Database db = new Database();
-             GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.1-flash-lite"))) {
-            StockRepository repository = new StockRepository(db);
-            GeminiStockAdvisor advisor = new GeminiStockAdvisor(repository, gemini);
-            System.out.println("Requesting Gemini suggestions for " + tickers + " ...");
-            List<GeminiSuggestion> suggestions = advisor.adviseMany(tickers);
-            for (GeminiSuggestion suggestion : suggestions) {
-                GeminiStockAdvisor.printSuggestion(suggestion);
-                System.out.println("Suggestion saved for " + suggestion.ticker()
-                        + " on " + suggestion.asOf());
+             GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.5-flash-lite"))) {
+            GeminiStockAdvisor advisor = new GeminiStockAdvisor(db, gemini);
+
+            for (int i = 0; i < tickers.size(); i += BATCH_ADVICE_CHUNK_SIZE) {
+                int chunkIndex = (i / BATCH_ADVICE_CHUNK_SIZE) + 1;
+                List<String> chunk = tickers.subList(
+                        i, Math.min(i + BATCH_ADVICE_CHUNK_SIZE, tickers.size()));
+                System.out.println("Gemini advice chunk " + chunkIndex + "/" + chunkCount
+                        + ": " + chunk);
+
+                try {
+                    List<GeminiSuggestion> suggestions = advisor.adviseMany(chunk, paramId);
+                    for (GeminiSuggestion suggestion : suggestions) {
+                        GeminiStockAdvisor.printSuggestion(suggestion);
+                        System.out.println("Suggestion saved for " + suggestion.ticker()
+                                + " on " + suggestion.asOf());
+                    }
+                    totalSaved += suggestions.size();
+                } catch (Exception e) {
+                    System.err.println("Advice failed for chunk " + chunkIndex + "/" + chunkCount
+                            + " " + chunk + ": " + e.getMessage());
+                    e.printStackTrace();
+                }
+
+                if (i + BATCH_ADVICE_CHUNK_SIZE < tickers.size()) {
+                    System.out.println("Waiting 1 minute for Gemini cooldown...");
+                    try {
+                        Thread.sleep(BATCH_ADVICE_COOLDOWN_MILLIS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        System.err.println("Advice interrupted during cooldown; stopping.");
+                        break;
+                    }
+                }
             }
-            System.out.println("Batch complete: " + suggestions.size() + " suggestion(s) saved.");
+            System.out.println("Batch complete: " + totalSaved + " suggestion(s) saved.");
         } catch (Exception e) {
             System.err.println("Advice failed: " + e.getMessage());
             e.printStackTrace();
@@ -100,17 +140,18 @@ public class App {
      * split the interval into calendar months and backfill each month separately. Wait two minutes
      * between months to let the Gemini API cool down.
      */
-    private static void backfillSuggestions(String ticker, LocalDate from, LocalDate to) {
+    private static void backfillSuggestions(
+            String ticker, LocalDate from, LocalDate to, long paramId) {
         List<DateRange> ranges = monthlyRanges(from, to);
         String symbol = ticker.toUpperCase(Locale.ROOT);
         System.out.println("Backfill for " + symbol + " split into "
-                + ranges.size() + " monthly interval(s).");
+                + ranges.size() + " monthly interval(s); param_id=" + paramId);
 
         for (int i = 0; i < ranges.size(); i++) {
             DateRange range = ranges.get(i);
             System.out.println("Monthly backfill " + (i + 1) + "/" + ranges.size()
                     + ": " + range.from() + " to " + range.to());
-            backfillSuggestionsForRange(ticker, range.from(), range.to());
+            backfillSuggestionsForRange(ticker, range.from(), range.to(), paramId);
 
             if (i < ranges.size() - 1) {
                 System.out.println("Waiting 2 minutes for Gemini cooldown...");
@@ -154,14 +195,15 @@ public class App {
     private static void backfillSuggestionsForRange(
             String ticker,
             LocalDate from,
-            LocalDate to) {
+            LocalDate to,
+            long paramId) {
         String symbol = ticker.toUpperCase();
         System.out.println("Backfilling Gemini suggestions for " + symbol
-                + " from " + from + " to " + to + " ...");
+                + " from " + from + " to " + to + " (param_id=" + paramId + ") ...");
         try (Database db = new Database();
              GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.1-flash-lite"))) {
             StockRepository repository = new StockRepository(db);
-            GeminiStockAdvisor advisor = new GeminiStockAdvisor(repository, gemini);
+            GeminiStockAdvisor advisor = new GeminiStockAdvisor(db, gemini);
             List<LocalDate> dates = repository.findDatesInRange(symbol, from, to);
             if (dates.isEmpty()) {
                 System.out.println("No stored trading days for " + symbol
@@ -171,7 +213,7 @@ public class App {
 
             System.out.println("Found " + dates.size() + " trading day(s); sending in Gemini batches of "
                     + GeminiStockAdvisor.DEFAULT_HISTORICAL_CHUNK_SIZE + " ...");
-            List<GeminiSuggestion> suggestions = advisor.adviseAsOfMany(symbol, dates);
+            List<GeminiSuggestion> suggestions = advisor.adviseAsOfMany(symbol, dates, paramId);
             for (GeminiSuggestion suggestion : suggestions) {
                 GeminiStockAdvisor.printSuggestion(suggestion);
                 System.out.println("Suggestion saved for " + suggestion.ticker()
@@ -220,12 +262,16 @@ public class App {
     }
 
     public static void runBatchJob() {
+        runBatchJob(GeminiStockAdvisor.DEFAULT_PARAM_ID);
+    }
+
+    public static void runBatchJob(long paramId) {
         List<String> tickers = TickerList.loadFromAdmin();
         System.out.println("Using tickers from admin." + TickerList.ADMIN_KEY + ": " + tickers);
         for (String ticker : tickers) {
             refreshStockData(ticker);
         }
-        adviseStocks(tickers);
+        adviseStocks(tickers, paramId);
     }
 
     /**
@@ -357,19 +403,25 @@ public class App {
             LocalDate from,
             LocalDate to,
             double startingCash,
-            int topN) {
+            int topN,
+            long paramId) {
         String symbol = ticker.trim().toUpperCase(Locale.ROOT);
         System.out.println("Strategy search " + symbol + " from " + from + " to " + to
                 + " cash $" + String.format(Locale.US, "%,.2f", startingCash)
-                + " top=" + topN);
+                + " top=" + topN
+                + " param_id=" + paramId);
         try (Database db = new Database()) {
             StockRepository repository = new StockRepository(db);
-            List<BacktestDay> days = repository.findBacktestDays(symbol, from, to);
+            List<BacktestDay> days = repository.findBacktestDays(symbol, from, to, paramId);
             if (days.isEmpty()) {
                 System.err.println("No rows found for " + symbol + " in that date range.");
                 return;
             }
-            System.out.println("Trading days: " + days.size());
+            long withAction = days.stream()
+                    .filter(d -> d.suggestedAction() != null && !d.suggestedAction().isBlank())
+                    .count();
+            System.out.println("Trading days: " + days.size()
+                    + " (with suggestedAction for param_id=" + paramId + ": " + withAction + ")");
 
             SuggestionStrategyOptimizer.Report report =
                     SuggestionStrategyOptimizer.search(startingCash, days, topN);
@@ -453,7 +505,9 @@ public class App {
             String ticker = argValue(argList, "--ticker", "AAPL");
             LocalDate from = LocalDate.parse(argValue(argList, "--from", "2026-07-01"));
             LocalDate to = LocalDate.parse(argValue(argList, "--to", "2026-07-14"));
-            backfillSuggestions(ticker, from, to);
+            long paramId = Long.parseLong(argValue(argList, "--param-id",
+                    String.valueOf(GeminiStockAdvisor.DEFAULT_PARAM_ID)));
+            backfillSuggestions(ticker, from, to, paramId);
         }
 
         if (backtest) {
@@ -472,11 +526,15 @@ public class App {
             LocalDate to = LocalDate.parse(argValue(argList, "--to", "2026-07-17"));
             double cash = Double.parseDouble(argValue(argList, "--cash", "10000"));
             int topN = Integer.parseInt(argValue(argList, "--top", "15"));
-            runStrategySearch(ticker, from, to, cash, topN);
+            long paramId = Long.parseLong(argValue(argList, "--param-id",
+                    String.valueOf(GeminiStockAdvisor.DEFAULT_PARAM_ID)));
+            runStrategySearch(ticker, from, to, cash, topN, paramId);
         }
 
         if (runBatch) {
-            runBatchJob();
+            long paramId = Long.parseLong(argValue(argList, "--param-id",
+                    String.valueOf(GeminiStockAdvisor.DEFAULT_PARAM_ID)));
+            runBatchJob(paramId);
         }
 
         if (embedded) {
@@ -489,14 +547,16 @@ public class App {
         if (!runBatch && !backfill && !backtest && !optimize && !updateRsi) {
             System.out.println("Nothing to run. Options:");
             System.out.println("  --batch              refresh Yahoo data + Gemini suggestions");
+            System.out.println("      --param-id=1      tuning_params.id (num_date_point → lookback); default 1");
             System.out.println("  --update-rsi         recalculate RSI(14) for all watchlist tickers");
             System.out.println("  --backfill           Gemini backfill for historical days");
-            System.out.println("      --ticker=AAPL --from=2026-07-01 --to=2026-07-14");
+            System.out.println("      --ticker=AAPL --from=2026-07-01 --to=2026-07-14 --param-id=1");
             System.out.println("  --backtest           suggestion-driven long-only backtest");
             System.out.println("      --ticker=QQQ --from=2026-01-01 --to=2026-07-17 --cash=10000");
             System.out.println("      --strategy=all-in|parts --parts=4");
             System.out.println("  --optimize           grid-search strategy params for higher return");
             System.out.println("      --ticker=QQQ --from=2026-01-01 --to=2026-07-17 --cash=10000 --top=15");
+            System.out.println("      --param-id=1      suggestions version (tuning_params.id); default 1");
             System.out.println("  --embedded           start embedded Javalin on port 7070 (dev)");
             System.out.println("  --batch --embedded   batch then start embedded server");
             System.out.println("For Tomcat: mvn -DskipTests package  then copy target/stocksugg.war");

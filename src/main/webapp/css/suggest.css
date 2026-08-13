@@ -68,6 +68,17 @@ h1 {
   color-scheme: dark;
 }
 
+.date-form select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  max-width: 16rem;
+  color-scheme: dark;
+}
+
 .date-form input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 1;

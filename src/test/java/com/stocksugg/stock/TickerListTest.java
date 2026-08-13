@@ -16,6 +16,17 @@ class TickerListTest {
     }
 
     @Test
+    void acceptsExactlyMaxTickers() {
+        StringBuilder raw = new StringBuilder("T01");
+        for (int i = 2; i <= TickerList.MAX_TICKERS; i++) {
+            raw.append(",T").append(String.format("%02d", i));
+        }
+        List<String> tickers = TickerList.parse(raw.toString());
+        assertEquals(TickerList.MAX_TICKERS, tickers.size());
+        assertEquals(100, TickerList.MAX_TICKERS);
+    }
+
+    @Test
     void rejectsMoreThanMaxTickers() {
         StringBuilder raw = new StringBuilder("T01");
         for (int i = 2; i <= TickerList.MAX_TICKERS + 1; i++) {

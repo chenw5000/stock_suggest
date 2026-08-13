@@ -7,7 +7,10 @@ import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.Part;
 import com.google.genai.types.Schema;
 import com.google.genai.types.Type;
+import com.stocksugg.db.Database;
 import com.stocksugg.db.StockRepository;
+import com.stocksugg.db.SuggestionsRepository;
+import com.stocksugg.db.TuningParamsRepository;
 import com.stocksugg.gemini.GeminiService;
 
 import java.time.LocalDate;
@@ -20,11 +23,15 @@ import java.util.Set;
 
 /**
  * Loads recent bars from the database, asks Gemini for structured suggestion(s), prints and persists them.
+ * Lookback length comes from {@code tuning_params.num_date_point} when a param id is supplied.
  */
 public final class GeminiStockAdvisor {
 
     /** Max historical as-of packages per Gemini call (keeps prompt size manageable). */
     public static final int DEFAULT_HISTORICAL_CHUNK_SIZE = 4;
+
+    /** Default {@code tuning_params.id} when callers omit one (baseline lookback 40). */
+    public static final long DEFAULT_PARAM_ID = 1L;
 
     /** Canonical meanings for the action field (long-position framing only). */
     private static final String ACTION_DEFINITIONS = """
@@ -57,21 +64,44 @@ public final class GeminiStockAdvisor {
             When multiple stock packages are provided, return exactly one suggestion object
             per package in the suggestions array. Each package has ticker + asOf — copy that
             asOf into the suggestion, keep packages independent, and do not use later data.
+            When the package includes indicatorWeights, honor them: 0 means ignore that
+            indicator; higher weight means give it more influence on thesis and action.
+            Weights are relative priorities, not numeric multipliers of prices.
 
             """ + ACTION_DEFINITIONS;
 
     private final StockRepository repository;
+    private final TuningParamsRepository tuningParamsRepository;
+    private final SuggestionsRepository suggestionsRepository;
     private final GeminiService gemini;
     private final ObjectMapper objectMapper;
 
-    public GeminiStockAdvisor(StockRepository repository, GeminiService gemini) {
+    public GeminiStockAdvisor(Database database, GeminiService gemini) {
+        this(
+                new StockRepository(database),
+                new TuningParamsRepository(database),
+                new SuggestionsRepository(database),
+                gemini);
+    }
+
+    public GeminiStockAdvisor(
+            StockRepository repository,
+            TuningParamsRepository tuningParamsRepository,
+            SuggestionsRepository suggestionsRepository,
+            GeminiService gemini) {
         this.repository = repository;
+        this.tuningParamsRepository = tuningParamsRepository;
+        this.suggestionsRepository = suggestionsRepository;
         this.gemini = gemini;
         this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     public GeminiSuggestion advise(String ticker) throws Exception {
-        List<GeminiSuggestion> results = adviseMany(List.of(ticker));
+        return advise(ticker, DEFAULT_PARAM_ID);
+    }
+
+    public GeminiSuggestion advise(String ticker, long paramId) throws Exception {
+        List<GeminiSuggestion> results = adviseMany(List.of(ticker), paramId);
         if (results.isEmpty()) {
             throw new IllegalStateException("Gemini returned no suggestion for " + ticker);
         }
@@ -79,12 +109,32 @@ public final class GeminiStockAdvisor {
     }
 
     public List<GeminiSuggestion> adviseMany(List<String> tickers) throws Exception {
-        return adviseMany(tickers, StockSummaryBuilder.DEFAULT_LOOKBACK_BARS,
-                StockSummaryBuilder.DEFAULT_HORIZON_DAYS);
+        return adviseMany(tickers, DEFAULT_PARAM_ID);
+    }
+
+    /**
+     * Uses {@code tuning_params.num_date_point} as Gemini lookback for the given param id.
+     * Persists into {@code suggestions} for {@code paramId}.
+     */
+    public List<GeminiSuggestion> adviseMany(List<String> tickers, long paramId) throws Exception {
+        TuningParams params = requireTuningParams(paramId);
+        int lookbackBars = params.lookbackBars();
+        System.out.println("Using tuning_params id=" + params.id()
+                + (params.name() != null ? " (" + params.name() + ")" : "")
+                + ", lookback bars=" + lookbackBars);
+        return adviseMany(tickers, lookbackBars, StockSummaryBuilder.DEFAULT_HORIZON_DAYS, paramId);
     }
 
     public List<GeminiSuggestion> adviseMany(
             List<String> tickers, int lookbackBars, int horizonTradingDays) throws Exception {
+        return adviseMany(tickers, lookbackBars, horizonTradingDays, null);
+    }
+
+    public List<GeminiSuggestion> adviseMany(
+            List<String> tickers,
+            int lookbackBars,
+            int horizonTradingDays,
+            Long paramId) throws Exception {
         if (tickers == null || tickers.isEmpty()) {
             throw new IllegalArgumentException("At least one ticker is required.");
         }
@@ -103,7 +153,7 @@ public final class GeminiStockAdvisor {
             throw new IllegalStateException("No stock rows found for any requested ticker.");
         }
 
-        return requestAndPersist(snapshots, horizonTradingDays).persisted();
+        return requestAndPersist(snapshots, horizonTradingDays, paramId).persisted();
     }
 
     /**
@@ -111,7 +161,11 @@ public final class GeminiStockAdvisor {
      * Uses lookback bars ending on {@code asOf} (must already exist in the database).
      */
     public GeminiSuggestion adviseAsOf(String ticker, LocalDate asOf) throws Exception {
-        List<GeminiSuggestion> results = adviseAsOfMany(ticker, List.of(asOf));
+        return adviseAsOf(ticker, asOf, DEFAULT_PARAM_ID);
+    }
+
+    public GeminiSuggestion adviseAsOf(String ticker, LocalDate asOf, long paramId) throws Exception {
+        List<GeminiSuggestion> results = adviseAsOfMany(ticker, List.of(asOf), paramId);
         if (results.isEmpty()) {
             throw new IllegalStateException("Gemini returned no suggestion for " + ticker + " on " + asOf);
         }
@@ -120,15 +174,31 @@ public final class GeminiStockAdvisor {
 
     /**
      * Batch historical advice: one Gemini API call per chunk of as-of dates for the same ticker.
+     * Lookback comes from {@code tuning_params} id {@link #DEFAULT_PARAM_ID}.
      */
     public List<GeminiSuggestion> adviseAsOfMany(String ticker, List<LocalDate> asOfDates)
             throws Exception {
+        return adviseAsOfMany(ticker, asOfDates, DEFAULT_PARAM_ID);
+    }
+
+    /**
+     * Batch historical advice using lookback from {@code tuning_params.num_date_point}.
+     * Persists into {@code suggestions} for {@code paramId} (does not overwrite other param versions).
+     */
+    public List<GeminiSuggestion> adviseAsOfMany(
+            String ticker, List<LocalDate> asOfDates, long paramId) throws Exception {
+        TuningParams params = requireTuningParams(paramId);
+        int lookbackBars = params.lookbackBars();
+        System.out.println("Using tuning_params id=" + params.id()
+                + (params.name() != null ? " (" + params.name() + ")" : "")
+                + ", lookback bars=" + lookbackBars);
         return adviseAsOfMany(
                 ticker,
                 asOfDates,
-                StockSummaryBuilder.DEFAULT_LOOKBACK_BARS,
+                lookbackBars,
                 StockSummaryBuilder.DEFAULT_HORIZON_DAYS,
-                DEFAULT_HISTORICAL_CHUNK_SIZE);
+                DEFAULT_HISTORICAL_CHUNK_SIZE,
+                paramId);
     }
 
     public List<GeminiSuggestion> adviseAsOfMany(
@@ -137,6 +207,17 @@ public final class GeminiStockAdvisor {
             int lookbackBars,
             int horizonTradingDays,
             int chunkSize) throws Exception {
+        return adviseAsOfMany(
+                ticker, asOfDates, lookbackBars, horizonTradingDays, chunkSize, null);
+    }
+
+    public List<GeminiSuggestion> adviseAsOfMany(
+            String ticker,
+            List<LocalDate> asOfDates,
+            int lookbackBars,
+            int horizonTradingDays,
+            int chunkSize,
+            Long paramId) throws Exception {
         if (ticker == null || ticker.isBlank()) {
             throw new IllegalArgumentException("ticker is required.");
         }
@@ -174,20 +255,25 @@ public final class GeminiStockAdvisor {
         for (int i = 0; i < snapshots.size(); i += chunkSize) {
             List<AdviceSnapshot> chunk = new ArrayList<>(
                     snapshots.subList(i, Math.min(i + chunkSize, snapshots.size())));
-            all.addAll(requestChunkWithRetry(chunk, horizonTradingDays));
+            all.addAll(requestChunkWithRetry(chunk, horizonTradingDays, paramId));
         }
         return all;
+    }
+
+    private TuningParams requireTuningParams(long paramId) throws Exception {
+        return tuningParamsRepository.requireById(paramId);
     }
 
     /**
      * Sends a chunk to Gemini; any omitted asOf dates are retried one-by-one.
      */
     private List<GeminiSuggestion> requestChunkWithRetry(
-            List<AdviceSnapshot> chunk, int horizonTradingDays) throws Exception {
+            List<AdviceSnapshot> chunk, int horizonTradingDays, Long paramId) throws Exception {
         System.out.println("Gemini historical batch for " + chunk.getFirst().ticker()
                 + ": " + chunk.size() + " day(s) ("
-                + chunk.getFirst().asOf() + " .. " + chunk.getLast().asOf() + ")");
-        PersistResult first = requestAndPersist(chunk, horizonTradingDays);
+                + chunk.getFirst().asOf() + " .. " + chunk.getLast().asOf() + ")"
+                + (paramId != null ? ", param_id=" + paramId : ""));
+        PersistResult first = requestAndPersist(chunk, horizonTradingDays, paramId);
         List<GeminiSuggestion> all = new ArrayList<>(first.persisted());
 
         List<AdviceSnapshot> omitted = chunk.stream()
@@ -201,7 +287,7 @@ public final class GeminiStockAdvisor {
                 + " omitted day(s) one at a time (Gemini often drops packages in large batches)...");
         for (AdviceSnapshot snapshot : omitted) {
             System.out.println("Retry Gemini for " + snapshot.ticker() + " on " + snapshot.asOf());
-            PersistResult retry = requestAndPersist(List.of(snapshot), horizonTradingDays);
+            PersistResult retry = requestAndPersist(List.of(snapshot), horizonTradingDays, paramId);
             all.addAll(retry.persisted());
             if (!retry.omittedKeys().isEmpty()) {
                 System.err.println("Still missing after retry: " + snapshot.ticker()
@@ -213,10 +299,20 @@ public final class GeminiStockAdvisor {
 
     private PersistResult requestAndPersist(
             List<AdviceSnapshot> snapshots,
-            int horizonTradingDays) throws Exception {
+            int horizonTradingDays,
+            Long paramId) throws Exception {
         List<List<StockRow>> barLists = snapshots.stream().map(AdviceSnapshot::bars).toList();
         Map<String, Object> payload =
                 StockSummaryBuilder.buildMultiSnapshotPackage(barLists, horizonTradingDays);
+        if (paramId != null) {
+            TuningParams params = requireTuningParams(paramId);
+            payload.put("paramId", params.id());
+            if (params.name() != null && !params.name().isBlank()) {
+                payload.put("paramName", params.name());
+            }
+            payload.put("indicatorWeights", params.indicatorWeights());
+            payload.put("weightMeaning", TuningParams.WEIGHT_MEANING);
+        }
 
         Set<String> expectedKeys = new HashSet<>();
         List<String> asOfList = new ArrayList<>();
@@ -229,7 +325,8 @@ public final class GeminiStockAdvisor {
                 Analyze this multi-stock market package and return one suggestion per stock package.
 
                 in the response 'thesis', include the following information:
-                - INDICATOR ANALYSIS: the suggestion based on the passed in moving averages and indicators
+                - INDICATOR ANALYSIS: base this on the passed-in moving averages and indicators,
+                  emphasizing those with higher indicatorWeights (0 = ignore that series).
                 - TREND CONTEXT: Identify the prevailing short-term and medium-term trend context leading into the final 5 candlesticks.
                 - K-LINE RECOGNITION: Scan the most recent 1 to 5 candlesticks. Identify any specific price-action candlestick patterns (e.g., Doji, Hammer, Bullish/Bearish Engulfing, Marubozu, Harami, Piercing Line, or multi-bar reversal/continuation structures).
                 - VOLUME VALIDATION: Analyze whether the volume on the pattern bars confirms the move (e.g., expanding volume on breakout/reversal bars, or drying volume on pullbacks).
@@ -310,11 +407,7 @@ public final class GeminiStockAdvisor {
                 continue;
             }
 
-            int updated = repository.updateSuggestion(ticker, asOf, suggestion.toDbUpdate());
-            if (updated == 0) {
-                throw new IllegalStateException(
-                        "Failed to update suggestion for " + ticker + " on " + asOf);
-            }
+            persistSuggestion(ticker, asOf, suggestion, paramId);
             persisted.add(suggestion);
         }
 
@@ -325,6 +418,41 @@ public final class GeminiStockAdvisor {
                     + " package(s) in this batch: " + missing);
         }
         return new PersistResult(persisted, missing);
+    }
+
+    /**
+     * Writes to {@code suggestions} when {@code paramId} is set; keeps legacy {@code stock}
+     * suggestion columns in sync only for the default param (UI/backtest still read stock for now).
+     */
+    private void persistSuggestion(
+            String ticker,
+            LocalDate asOf,
+            GeminiSuggestion suggestion,
+            Long paramId) throws Exception {
+        SuggestionUpdate update = suggestion.toDbUpdate();
+        if (paramId != null) {
+            long stockId = repository.findId(ticker, asOf).orElseThrow(() -> new IllegalStateException(
+                    "No stock row for " + ticker + " on " + asOf
+                            + " (cannot write suggestions.stock_id)"));
+            int written = suggestionsRepository.upsert(stockId, paramId, update);
+            if (written == 0) {
+                throw new IllegalStateException(
+                        "Failed to upsert suggestions for " + ticker + " on " + asOf
+                                + " param_id=" + paramId);
+            }
+            System.out.println("Saved suggestions for " + ticker + " on " + asOf
+                    + " param_id=" + paramId + " stock_id=" + stockId);
+            // Mirror default param onto stock columns so existing UI keeps working during migration.
+            if (paramId == DEFAULT_PARAM_ID) {
+                repository.updateSuggestion(ticker, asOf, update);
+            }
+            return;
+        }
+        int updated = repository.updateSuggestion(ticker, asOf, update);
+        if (updated == 0) {
+            throw new IllegalStateException(
+                    "Failed to update suggestion for " + ticker + " on " + asOf);
+        }
     }
 
     public static void printSuggestion(GeminiSuggestion suggestion) {

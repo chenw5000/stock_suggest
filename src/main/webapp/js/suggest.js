@@ -3,6 +3,7 @@
 
   const params = new URLSearchParams(window.location.search);
   const dateInput = document.getElementById("date");
+  const DEFAULT_PARAM_ID = "1";
   const meta = document.getElementById("meta");
   const errorEl = document.getElementById("error");
   const emptyEl = document.getElementById("empty");
@@ -22,7 +23,9 @@
   }
 
   const date = params.get("date") || defaultSuggestDate();
-  dateInput.value = date;
+  if (dateInput) {
+    dateInput.value = date;
+  }
   document.title = "StockSugg — " + date;
 
   /** Resolve prev/next trading day from DB (skips weekends/holidays with no stock rows). */
@@ -82,7 +85,9 @@
 
   function apiUrl(d) {
     // Resolve against the app context (works under /stocksugg/ on Tomcat).
-    return new URL("api/suggest/" + encodeURIComponent(d), window.location.href).toString();
+    const url = new URL("api/suggest/" + encodeURIComponent(d), window.location.href);
+    url.searchParams.set("param", DEFAULT_PARAM_ID);
+    return url.toString();
   }
 
   function escapeHtml(value) {

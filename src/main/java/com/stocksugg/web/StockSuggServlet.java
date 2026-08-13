@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
         "/api/admin/*",
         "/api/batch",
         "/api/backtest",
+        "/api/tuning-params",
         "/suggest/*"
 })
 public final class StockSuggServlet extends HttpServlet {
@@ -43,11 +44,16 @@ public final class StockSuggServlet extends HttpServlet {
             return;
         }
 
+        if ("/api/tuning-params".equals(path)) {
+            writeTuningParamsApi(resp);
+            return;
+        }
+
         if ("/api/suggest".equals(path)) {
             if (isAdjacentSuggestPath(req.getPathInfo())) {
                 writeAdjacentSuggestApi(req, resp);
             } else {
-                writeSuggestApi(req.getPathInfo(), resp);
+                writeSuggestApi(req, resp);
             }
             return;
         }
@@ -225,6 +231,17 @@ public final class StockSuggServlet extends HttpServlet {
         return "adjacent".equalsIgnoreCase(segment);
     }
 
+    private static void writeTuningParamsApi(HttpServletResponse resp) throws IOException {
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(SuggestApi.tuningParamsJson());
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to load tuning params: " + e.getMessage()));
+        }
+    }
+
     private static void writeAdjacentSuggestApi(HttpServletRequest req, HttpServletResponse resp)
             throws IOException {
         String rawDate = req.getParameter("date");
@@ -275,11 +292,12 @@ public final class StockSuggServlet extends HttpServlet {
         }
     }
 
-    private static void writeSuggestApi(String pathInfo, HttpServletResponse resp) throws IOException {
-        String rawDate = extractPathSegment(pathInfo);
+    private static void writeSuggestApi(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String rawDate = extractPathSegment(req.getPathInfo());
         if (rawDate == null) {
             writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
-                    "error", "Missing date. Use /api/suggest/yyyy-MM-dd."));
+                    "error", "Missing date. Use /api/suggest/yyyy-MM-dd?param=1."));
             return;
         }
 
@@ -292,10 +310,12 @@ public final class StockSuggServlet extends HttpServlet {
             return;
         }
 
+        long paramId = parsePositiveLong(req.getParameter("param"), 1L);
+
         try {
             resp.setStatus(HttpServletResponse.SC_OK);
             resp.setContentType("application/json; charset=UTF-8");
-            resp.getWriter().write(SuggestApi.suggestionsJson(date));
+            resp.getWriter().write(SuggestApi.suggestionsJson(date, paramId));
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Failed to load suggestions: " + e.getMessage()));
@@ -313,11 +333,12 @@ public final class StockSuggServlet extends HttpServlet {
 
         int page = parsePositiveInt(req.getParameter("page"), 1);
         int pageSize = parsePositiveInt(req.getParameter("pageSize"), HistoryApi.DEFAULT_PAGE_SIZE);
+        long paramId = parsePositiveLong(req.getParameter("param"), 1L);
 
         try {
             resp.setStatus(HttpServletResponse.SC_OK);
             resp.setContentType("application/json; charset=UTF-8");
-            resp.getWriter().write(HistoryApi.historyJson(ticker, page, pageSize));
+            resp.getWriter().write(HistoryApi.historyJson(ticker, page, pageSize, paramId));
         } catch (IllegalArgumentException e) {
             writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -381,6 +402,18 @@ public final class StockSuggServlet extends HttpServlet {
         }
         try {
             int value = Integer.parseInt(raw.trim());
+            return value < 1 ? defaultValue : value;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    private static long parsePositiveLong(String raw, long defaultValue) {
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            long value = Long.parseLong(raw.trim());
             return value < 1 ? defaultValue : value;
         } catch (NumberFormatException e) {
             return defaultValue;

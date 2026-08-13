@@ -85,6 +85,16 @@ public final class StockRepository {
             ORDER BY "date"
             """;
 
+    private static final String SELECT_BACKTEST_DAYS_WITH_PARAM = """
+            SELECT s."date" AS "date", s.close AS close,
+                   g.suggestedaction AS suggestedAction,
+                   g.confidence AS confidence
+            FROM stock s
+            LEFT JOIN suggestions g ON g.stock_id = s.id AND g.param_id = ?
+            WHERE s.ticker = ? AND s."date" >= ? AND s."date" <= ?
+            ORDER BY s."date"
+            """;
+
     private static final String SELECT_BY_DATE = """
             SELECT id, ticker, "date", open, high, low, close,
                    ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF,
@@ -94,6 +104,26 @@ public final class StockRepository {
             FROM stock
             WHERE "date" = ?
             ORDER BY ticker
+            """;
+
+    /**
+     * Market bars for a date plus versioned Gemini fields from {@code suggestions}
+     * for the given {@code param_id} (LEFT JOIN — missing labels stay null).
+     */
+    private static final String SELECT_BY_DATE_WITH_PARAM = """
+            SELECT s.id, s.ticker, s."date", s.open, s.high, s.low, s.close,
+                   s.ma5, s.ma10, s.ma20, s.ma50, s.ma200, s.rsi14, s.chandeMmt, s.chalkinMF,
+                   g.suggestedaction AS suggestedAction,
+                   g.confidence AS confidence,
+                   g.suggestedstopprice AS suggestedStopPrice,
+                   g.suggestedentryprice AS suggestedEntryPrice,
+                   g.suggestedprofitprice AS suggestedProfitPrice,
+                   g.thesis AS thesis,
+                   g.risks AS risks
+            FROM stock s
+            LEFT JOIN suggestions g ON g.stock_id = s.id AND g.param_id = ?
+            WHERE s."date" = ?
+            ORDER BY s.ticker
             """;
 
     /** Latest close strictly before {@code date} for each ticker that has a row on that date. */
@@ -130,6 +160,35 @@ public final class StockRepository {
             LIMIT ? OFFSET ?
             """;
 
+    /**
+     * History page with suggestion fields from {@code suggestions} for a tuning param set.
+     */
+    private static final String SELECT_HISTORY_PAGE_WITH_PARAM = """
+            SELECT id, ticker, "date", open, high, low, close,
+                   ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF,
+                   suggestedAction, confidence,
+                   suggestedStopPrice, suggestedEntryPrice, suggestedProfitPrice,
+                   thesis, risks,
+                   previousClose
+            FROM (
+                SELECT s.id, s.ticker, s."date", s.open, s.high, s.low, s.close,
+                       s.ma5, s.ma10, s.ma20, s.ma50, s.ma200, s.rsi14, s.chandeMmt, s.chalkinMF,
+                       g.suggestedaction AS suggestedAction,
+                       g.confidence AS confidence,
+                       g.suggestedstopprice AS suggestedStopPrice,
+                       g.suggestedentryprice AS suggestedEntryPrice,
+                       g.suggestedprofitprice AS suggestedProfitPrice,
+                       g.thesis AS thesis,
+                       g.risks AS risks,
+                       LAG(s.close) OVER (ORDER BY s."date") AS previousClose
+                FROM stock s
+                LEFT JOIN suggestions g ON g.stock_id = s.id AND g.param_id = ?
+                WHERE s.ticker = ?
+            ) hist
+            ORDER BY "date" DESC
+            LIMIT ? OFFSET ?
+            """;
+
     private static final String UPDATE_SUGGESTION = """
             UPDATE stock
             SET suggestedAction = ?,
@@ -152,6 +211,21 @@ public final class StockRepository {
 
     public StockRepository(Database database) {
         this.connection = database.connection();
+    }
+
+    /** Primary key of the stock row for {@code ticker} on {@code date}, if present. */
+    public Optional<Long> findId(String ticker, LocalDate date) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT id FROM stock WHERE ticker = ? AND \"date\" = ?")) {
+            ps.setString(1, ticker.toUpperCase());
+            ps.setString(2, date.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(rs.getLong(1));
+                }
+                return Optional.empty();
+            }
+        }
     }
 
     /**
@@ -322,7 +396,7 @@ public final class StockRepository {
 
     /**
      * Close price + suggestedAction for ticker in [{@code from}, {@code to}], ascending by date.
-     * Days with a null close are omitted.
+     * Days with a null close are omitted. Uses legacy columns on {@code stock}.
      */
     public List<BacktestDay> findBacktestDays(String ticker, LocalDate from, LocalDate to)
             throws SQLException {
@@ -333,19 +407,44 @@ public final class StockRepository {
             ps.setString(3, to.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    Float close = getFloat(rs, "close");
-                    if (close == null) {
-                        continue;
-                    }
-                    days.add(new BacktestDay(
-                            LocalDate.parse(rs.getString("date")),
-                            close,
-                            rs.getString("suggestedAction"),
-                            getFloat(rs, "confidence")));
+                    addBacktestDay(days, rs);
                 }
             }
         }
         return days;
+    }
+
+    /**
+     * Same as {@link #findBacktestDays(String, LocalDate, LocalDate)} but labels come from
+     * {@code suggestions} for {@code paramId} (LEFT JOIN — missing param labels stay null).
+     */
+    public List<BacktestDay> findBacktestDays(
+            String ticker, LocalDate from, LocalDate to, long paramId) throws SQLException {
+        List<BacktestDay> days = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_BACKTEST_DAYS_WITH_PARAM)) {
+            ps.setLong(1, paramId);
+            ps.setString(2, ticker.toUpperCase());
+            ps.setString(3, from.toString());
+            ps.setString(4, to.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    addBacktestDay(days, rs);
+                }
+            }
+        }
+        return days;
+    }
+
+    private static void addBacktestDay(List<BacktestDay> days, ResultSet rs) throws SQLException {
+        Float close = getFloat(rs, "close");
+        if (close == null) {
+            return;
+        }
+        days.add(new BacktestDay(
+                LocalDate.parse(rs.getString("date")),
+                close,
+                rs.getString("suggestedAction"),
+                getFloat(rs, "confidence")));
     }
 
     /** OHLC bars for ticker in [{@code from}, {@code to}], ascending by date. */
@@ -383,40 +482,61 @@ public final class StockRepository {
                 getFloat(rs, "chalkinMF"));
     }
 
-    /** All tickers for a single trading date, ordered by ticker. */
+    /** All tickers for a single trading date, ordered by ticker (legacy stock columns). */
     public List<StockDayView> findByDate(LocalDate date) throws SQLException {
         List<StockDayView> rows = new ArrayList<>();
         try (PreparedStatement ps = connection.prepareStatement(SELECT_BY_DATE)) {
             ps.setString(1, date.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    rows.add(new StockDayView(
-                            rs.getLong("id"),
-                            rs.getString("ticker"),
-                            LocalDate.parse(rs.getString("date")),
-                            getFloat(rs, "open"),
-                            getFloat(rs, "high"),
-                            getFloat(rs, "low"),
-                            getFloat(rs, "close"),
-                            getFloat(rs, "ma5"),
-                            getFloat(rs, "ma10"),
-                            getFloat(rs, "ma20"),
-                            getFloat(rs, "ma50"),
-                            getFloat(rs, "ma200"),
-                            getFloat(rs, "rsi14"),
-                            getFloat(rs, "chandeMmt"),
-                            getFloat(rs, "chalkinMF"),
-                            rs.getString("suggestedAction"),
-                            getFloat(rs, "confidence"),
-                            getFloat(rs, "suggestedStopPrice"),
-                            getFloat(rs, "suggestedEntryPrice"),
-                            getFloat(rs, "suggestedProfitPrice"),
-                            StringListCodec.decode(rs.getString("thesis")),
-                            StringListCodec.decode(rs.getString("risks"))));
+                    rows.add(mapStockDayView(rs));
                 }
             }
         }
         return rows;
+    }
+
+    /**
+     * Bars for {@code date} with suggestion fields from {@code suggestions} for {@code paramId}.
+     */
+    public List<StockDayView> findByDate(LocalDate date, long paramId) throws SQLException {
+        List<StockDayView> rows = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_BY_DATE_WITH_PARAM)) {
+            ps.setLong(1, paramId);
+            ps.setString(2, date.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(mapStockDayView(rs));
+                }
+            }
+        }
+        return rows;
+    }
+
+    private static StockDayView mapStockDayView(ResultSet rs) throws SQLException {
+        return new StockDayView(
+                rs.getLong("id"),
+                rs.getString("ticker"),
+                LocalDate.parse(rs.getString("date")),
+                getFloat(rs, "open"),
+                getFloat(rs, "high"),
+                getFloat(rs, "low"),
+                getFloat(rs, "close"),
+                getFloat(rs, "ma5"),
+                getFloat(rs, "ma10"),
+                getFloat(rs, "ma20"),
+                getFloat(rs, "ma50"),
+                getFloat(rs, "ma200"),
+                getFloat(rs, "rsi14"),
+                getFloat(rs, "chandeMmt"),
+                getFloat(rs, "chalkinMF"),
+                rs.getString("suggestedAction"),
+                getFloat(rs, "confidence"),
+                getFloat(rs, "suggestedStopPrice"),
+                getFloat(rs, "suggestedEntryPrice"),
+                getFloat(rs, "suggestedProfitPrice"),
+                StringListCodec.decode(rs.getString("thesis")),
+                StringListCodec.decode(rs.getString("risks")));
     }
 
     /**
@@ -442,10 +562,19 @@ public final class StockRepository {
 
     /**
      * Newest-first history page for a ticker, including previous trading-day close for change %.
-     * {@code page} is 1-based.
+     * {@code page} is 1-based. Uses legacy suggestion columns on {@code stock}.
      */
     public List<Map<String, Object>> findHistoryPage(String ticker, int page, int pageSize)
             throws SQLException {
+        return findHistoryPage(ticker, page, pageSize, null);
+    }
+
+    /**
+     * Newest-first history page; when {@code paramId} is non-null, suggestion fields come from
+     * {@code suggestions} for that param (LEFT JOIN).
+     */
+    public List<Map<String, Object>> findHistoryPage(
+            String ticker, int page, int pageSize, Long paramId) throws SQLException {
         if (page < 1) {
             throw new IllegalArgumentException("page must be >= 1");
         }
@@ -455,47 +584,59 @@ public final class StockRepository {
         String symbol = ticker.toUpperCase();
         int offset = (page - 1) * pageSize;
         List<Map<String, Object>> rows = new ArrayList<>();
-        try (PreparedStatement ps = connection.prepareStatement(SELECT_HISTORY_PAGE)) {
-            ps.setString(1, symbol);
-            ps.setInt(2, pageSize);
-            ps.setInt(3, offset);
+        String sql = paramId == null ? SELECT_HISTORY_PAGE : SELECT_HISTORY_PAGE_WITH_PARAM;
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            if (paramId == null) {
+                ps.setString(1, symbol);
+                ps.setInt(2, pageSize);
+                ps.setInt(3, offset);
+            } else {
+                ps.setLong(1, paramId);
+                ps.setString(2, symbol);
+                ps.setInt(3, pageSize);
+                ps.setInt(4, offset);
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    row.put("id", rs.getLong("id"));
-                    row.put("ticker", rs.getString("ticker"));
-                    row.put("date", rs.getString("date"));
-                    row.put("close", getFloat(rs, "close"));
-                    row.put("ma50", getFloat(rs, "ma50"));
-                    row.put("rsi14", getFloat(rs, "rsi14"));
-                    row.put("chandeMmt", getFloat(rs, "chandeMmt"));
-                    row.put("chalkinMF", getFloat(rs, "chalkinMF"));
-                    row.put("suggestedAction", rs.getString("suggestedAction"));
-                    row.put("confidence", getFloat(rs, "confidence"));
-                    row.put("suggestedStopPrice", getFloat(rs, "suggestedStopPrice"));
-                    row.put("suggestedEntryPrice", getFloat(rs, "suggestedEntryPrice"));
-                    row.put("suggestedProfitPrice", getFloat(rs, "suggestedProfitPrice"));
-                    row.put("thesis", StringListCodec.decode(rs.getString("thesis")));
-                    row.put("risks", StringListCodec.decode(rs.getString("risks")));
-
-                    Float close = getFloat(rs, "close");
-                    Float previousClose = getFloat(rs, "previousClose");
-                    Float change = null;
-                    Float changePct = null;
-                    if (close != null && previousClose != null) {
-                        change = close - previousClose;
-                        if (previousClose != 0f) {
-                            changePct = (change / previousClose) * 100f;
-                        }
-                    }
-                    row.put("previousClose", previousClose);
-                    row.put("change", change);
-                    row.put("changePct", changePct);
-                    rows.add(row);
+                    rows.add(mapHistoryRow(rs));
                 }
             }
         }
         return rows;
+    }
+
+    private static Map<String, Object> mapHistoryRow(ResultSet rs) throws SQLException {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", rs.getLong("id"));
+        row.put("ticker", rs.getString("ticker"));
+        row.put("date", rs.getString("date"));
+        row.put("close", getFloat(rs, "close"));
+        row.put("ma50", getFloat(rs, "ma50"));
+        row.put("rsi14", getFloat(rs, "rsi14"));
+        row.put("chandeMmt", getFloat(rs, "chandeMmt"));
+        row.put("chalkinMF", getFloat(rs, "chalkinMF"));
+        row.put("suggestedAction", rs.getString("suggestedAction"));
+        row.put("confidence", getFloat(rs, "confidence"));
+        row.put("suggestedStopPrice", getFloat(rs, "suggestedStopPrice"));
+        row.put("suggestedEntryPrice", getFloat(rs, "suggestedEntryPrice"));
+        row.put("suggestedProfitPrice", getFloat(rs, "suggestedProfitPrice"));
+        row.put("thesis", StringListCodec.decode(rs.getString("thesis")));
+        row.put("risks", StringListCodec.decode(rs.getString("risks")));
+
+        Float close = getFloat(rs, "close");
+        Float previousClose = getFloat(rs, "previousClose");
+        Float change = null;
+        Float changePct = null;
+        if (close != null && previousClose != null) {
+            change = close - previousClose;
+            if (previousClose != 0f) {
+                changePct = (change / previousClose) * 100f;
+            }
+        }
+        row.put("previousClose", previousClose);
+        row.put("change", change);
+        row.put("changePct", changePct);
+        return row;
     }
 
     public int updateSuggestion(String ticker, LocalDate date, SuggestionUpdate suggestion)

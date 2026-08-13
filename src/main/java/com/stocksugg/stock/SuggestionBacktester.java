@@ -86,63 +86,62 @@ public final class SuggestionBacktester {
                 continue;
             }
 
-            switch (intent) {
-                case BUY_PART, BUY_ALL -> {
-                    if (cash < day.close()) {
-                        skippedBuys++;
-                        trades.add(trade(day, "SKIP_BUY_NO_CASH", 0, cash, totalShares(lots)));
-                        break;
-                    }
-                    double budget = intent == BacktestStrategy.TradeIntent.BUY_ALL
-                            ? cash
-                            : Math.min(partSize, cash);
-                    // Classic all-in: only buy when flat
-                    if (intent == BacktestStrategy.TradeIntent.BUY_ALL
-                            && strategy.parts() == 1
-                            && !lots.isEmpty()) {
-                        skippedBuys++;
-                        trades.add(trade(day, "SKIP_BUY_ALREADY_LONG", 0, cash, totalShares(lots)));
-                        break;
-                    }
-                    int toBuy = (int) Math.floor(budget / day.close());
-                    if (toBuy <= 0) {
-                        skippedBuys++;
-                        trades.add(trade(day, "SKIP_BUY_PART_TOO_SMALL", 0, cash, totalShares(lots)));
-                    } else {
-                        cash -= toBuy * (double) day.close();
-                        lots.addLast(toBuy);
-                        buyCount++;
-                        String event = intent == BacktestStrategy.TradeIntent.BUY_ALL ? "BUY_ALL" : "BUY_PART";
-                        trades.add(trade(day, event, toBuy, cash, totalShares(lots)));
-                    }
+            // Prefer plain conditionals (not multi-case switch with blocks) so javac does not
+            // emit synthetic SuggestionBacktester$1 — exec:java's classloader often fails on it
+            // after an incomplete incremental compile.
+            if (intent == BacktestStrategy.TradeIntent.BUY_PART
+                    || intent == BacktestStrategy.TradeIntent.BUY_ALL) {
+                if (cash < day.close()) {
+                    skippedBuys++;
+                    trades.add(trade(day, "SKIP_BUY_NO_CASH", 0, cash, totalShares(lots)));
+                    continue;
                 }
-                case SELL_PART, SELL_ALL -> {
-                    if (lots.isEmpty()) {
-                        String action = day.suggestedAction() == null
-                                ? ""
-                                : day.suggestedAction().trim().toUpperCase(Locale.ROOT);
-                        if ("SELL".equals(action)) {
-                            trades.add(trade(day, "SKIP_SELL_NO_SHARES", 0, cash, 0));
-                        }
-                        break;
-                    }
-                    int sold;
-                    String event;
-                    if (intent == BacktestStrategy.TradeIntent.SELL_ALL) {
-                        sold = totalShares(lots);
-                        lots.clear();
-                        event = "SELL_ALL";
-                    } else {
-                        sold = lots.removeFirst();
-                        event = "SELL_PART";
-                    }
-                    cash += sold * (double) day.close();
-                    sellCount++;
-                    trades.add(trade(day, event, -sold, cash, totalShares(lots)));
+                double budget = intent == BacktestStrategy.TradeIntent.BUY_ALL
+                        ? cash
+                        : Math.min(partSize, cash);
+                // Classic all-in: only buy when flat
+                if (intent == BacktestStrategy.TradeIntent.BUY_ALL
+                        && strategy.parts() == 1
+                        && !lots.isEmpty()) {
+                    skippedBuys++;
+                    trades.add(trade(day, "SKIP_BUY_ALREADY_LONG", 0, cash, totalShares(lots)));
+                    continue;
                 }
-                case NONE -> {
-                    // unreachable
+                int toBuy = (int) Math.floor(budget / day.close());
+                if (toBuy <= 0) {
+                    skippedBuys++;
+                    trades.add(trade(day, "SKIP_BUY_PART_TOO_SMALL", 0, cash, totalShares(lots)));
+                } else {
+                    cash -= toBuy * (double) day.close();
+                    lots.addLast(toBuy);
+                    buyCount++;
+                    String event = intent == BacktestStrategy.TradeIntent.BUY_ALL ? "BUY_ALL" : "BUY_PART";
+                    trades.add(trade(day, event, toBuy, cash, totalShares(lots)));
                 }
+            } else if (intent == BacktestStrategy.TradeIntent.SELL_PART
+                    || intent == BacktestStrategy.TradeIntent.SELL_ALL) {
+                if (lots.isEmpty()) {
+                    String action = day.suggestedAction() == null
+                            ? ""
+                            : day.suggestedAction().trim().toUpperCase(Locale.ROOT);
+                    if ("SELL".equals(action)) {
+                        trades.add(trade(day, "SKIP_SELL_NO_SHARES", 0, cash, 0));
+                    }
+                    continue;
+                }
+                int sold;
+                String event;
+                if (intent == BacktestStrategy.TradeIntent.SELL_ALL) {
+                    sold = totalShares(lots);
+                    lots.clear();
+                    event = "SELL_ALL";
+                } else {
+                    sold = lots.removeFirst();
+                    event = "SELL_PART";
+                }
+                cash += sold * (double) day.close();
+                sellCount++;
+                trades.add(trade(day, event, -sold, cash, totalShares(lots)));
             }
         }
 

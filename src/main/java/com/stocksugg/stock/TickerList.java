@@ -18,7 +18,7 @@ import java.util.Set;
 public final class TickerList {
 
     public static final String ADMIN_KEY = "TICKERS";
-    public static final int MAX_TICKERS = 20;
+    public static final int MAX_TICKERS = 100;
 
     private TickerList() {}
 

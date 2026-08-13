@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.stocksugg.db.Database;
 import com.stocksugg.db.StockRepository;
+import com.stocksugg.db.TuningParamsRepository;
 import com.stocksugg.stock.StockDayView;
+import com.stocksugg.stock.TuningParams;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -23,6 +25,29 @@ public final class SuggestApi {
 
     private SuggestApi() {}
 
+    /** All tuning_params rows for the UI dropdown ({@code id} + {@code name}). */
+    public static String tuningParamsJson() throws Exception {
+        try (Database db = new Database()) {
+            TuningParamsRepository repository = new TuningParamsRepository(db);
+            List<Map<String, Object>> params = new ArrayList<>();
+            for (TuningParams row : repository.findAll()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", row.id());
+                String name = row.name();
+                if (name == null || name.isBlank()) {
+                    name = "id " + row.id();
+                }
+                item.put("name", name);
+                item.put("numDatePoint", row.numDatePoint());
+                params.add(item);
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("count", params.size());
+            body.put("params", params);
+            return MAPPER.writeValueAsString(body);
+        }
+    }
+
     /**
      * Nearest date in {@code stock} before/after {@code from} ({@code direction} &lt; 0 prev, &gt; 0 next).
      */
@@ -39,9 +64,17 @@ public final class SuggestApi {
     }
 
     public static String suggestionsJson(LocalDate date) throws Exception {
+        return suggestionsJson(date, 1L);
+    }
+
+    /**
+     * Stock rows for {@code date} with suggestion labels from {@code suggestions}
+     * for the given {@code paramId}.
+     */
+    public static String suggestionsJson(LocalDate date, long paramId) throws Exception {
         try (Database db = new Database()) {
             StockRepository repository = new StockRepository(db);
-            List<StockDayView> rows = repository.findByDate(date);
+            List<StockDayView> rows = repository.findByDate(date, paramId);
             Map<String, Float> previousCloses = repository.findPreviousCloses(date);
 
             List<Map<String, Object>> enriched = new ArrayList<>(rows.size());
@@ -65,6 +98,7 @@ public final class SuggestApi {
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("date", date.toString());
+            body.put("paramId", paramId);
             body.put("count", enriched.size());
             body.put("rows", enriched);
             return MAPPER.writeValueAsString(body);
