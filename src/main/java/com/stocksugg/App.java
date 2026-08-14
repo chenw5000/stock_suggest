@@ -2,6 +2,7 @@ package com.stocksugg;
 
 import com.stocksugg.db.Database;
 import com.stocksugg.db.StockRepository;
+import com.stocksugg.db.StrategyOptimizeRepository;
 import com.stocksugg.gemini.GeminiConfig;
 import com.stocksugg.gemini.GeminiService;
 import com.stocksugg.stock.BacktestDay;
@@ -10,6 +11,7 @@ import com.stocksugg.stock.GeminiSuggestion;
 import com.stocksugg.stock.MarketSession;
 import com.stocksugg.stock.StockDataImporter;
 import com.stocksugg.stock.StockRow;
+import com.stocksugg.stock.StrategyOptimize;
 import com.stocksugg.stock.SuggestionBacktester;
 import com.stocksugg.stock.SuggestionStrategyOptimizer;
 import com.stocksugg.stock.TechnicalIndicators;
@@ -398,24 +400,45 @@ public class App {
         }
     }
 
-    private static void runStrategySearch(
+    /**
+     * Grid-searches strategies for {@code ticker} in [{@code from}, {@code to}],
+     * upserts the best ({@code rank=1}) into {@code strategy_optimize}, and returns it.
+     */
+    public static StrategyOptimize optimizeAndSave(
             String ticker,
             LocalDate from,
             LocalDate to,
             double startingCash,
             int topN,
-            long paramId) {
+            long paramId) throws Exception {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("from and to are required");
+        }
+        if (from.isAfter(to)) {
+            throw new IllegalArgumentException("from must be on or before to");
+        }
+        if (startingCash <= 0) {
+            throw new IllegalArgumentException("startingCash must be > 0");
+        }
+        if (topN < 1) {
+            throw new IllegalArgumentException("topN must be >= 1");
+        }
+
         String symbol = ticker.trim().toUpperCase(Locale.ROOT);
         System.out.println("Strategy search " + symbol + " from " + from + " to " + to
                 + " cash $" + String.format(Locale.US, "%,.2f", startingCash)
                 + " top=" + topN
                 + " param_id=" + paramId);
+
         try (Database db = new Database()) {
             StockRepository repository = new StockRepository(db);
             List<BacktestDay> days = repository.findBacktestDays(symbol, from, to, paramId);
             if (days.isEmpty()) {
-                System.err.println("No rows found for " + symbol + " in that date range.");
-                return;
+                throw new IllegalArgumentException(
+                        "No rows found for " + symbol + " in " + from + " .. " + to);
             }
             long withAction = days.stream()
                     .filter(d -> d.suggestedAction() != null && !d.suggestedAction().isBlank())
@@ -446,7 +469,28 @@ public class App {
                 System.out.println("    " + candidate.strategy());
             }
 
+            if (report.top().isEmpty()) {
+                throw new IllegalStateException("No strategy candidates produced for " + symbol);
+            }
+
             SuggestionStrategyOptimizer.Candidate best = report.top().getFirst();
+            StrategyOptimizeRepository optimizeRepo = new StrategyOptimizeRepository(db);
+            StrategyOptimize bestRow = StrategyOptimize.fromSearch(
+                    symbol,
+                    paramId,
+                    from,
+                    to,
+                    startingCash,
+                    best.strategy(),
+                    best.result(),
+                    report.buyAndHold(),
+                    1);
+            optimizeRepo.upsert(bestRow);
+            System.out.println("Saved best strategy (rank=1) to strategy_optimize for "
+                    + symbol + " " + from + " .. " + to
+                    + " equity=$" + String.format(Locale.US, "%,.2f", best.result().endingEquity())
+                    + " return=" + String.format(Locale.US, "%+.2f%%", best.result().returnPct()));
+
             System.out.println("--- Best strategy trades ---");
             for (SuggestionBacktester.Trade trade : best.result().trades()) {
                 if (trade.event().startsWith("SKIP_")) {
@@ -464,6 +508,21 @@ public class App {
                         trade.day().confidence() == null ? "—" : String.format(Locale.US, "%.2f",
                                 trade.day().confidence()));
             }
+
+            return optimizeRepo.findByKey(symbol, paramId, from, to, 1)
+                    .orElse(bestRow);
+        }
+    }
+
+    private static void runStrategySearch(
+            String ticker,
+            LocalDate from,
+            LocalDate to,
+            double startingCash,
+            int topN,
+            long paramId) {
+        try {
+            optimizeAndSave(ticker, from, to, startingCash, topN, paramId);
         } catch (Exception e) {
             System.err.println("Strategy search failed: " + e.getMessage());
             e.printStackTrace();

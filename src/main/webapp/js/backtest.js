@@ -19,8 +19,12 @@
   const tradesEmpty = document.getElementById("trades-empty");
   const tradesTable = document.getElementById("trades-table");
   const tradesBody = document.getElementById("trades-body");
+  const bestStrategyLine = document.getElementById("best-strategy-line");
+  const bestStrategyActions = document.getElementById("best-strategy-actions");
+  const findBestBtn = document.getElementById("find-best-btn");
 
   const params = new URLSearchParams(window.location.search);
+  const DEFAULT_PARAM_ID = "1";
 
   function apiUrl(path) {
     return new URL(path, window.location.href).toString();
@@ -75,8 +79,16 @@
   }
 
   function setDefaults() {
-    fromInput.value = params.get("from") || "2026-01-01";
-    toInput.value = params.get("to") || "2026-07-21";
+    const today = new Date();
+    const fromDefault = new Date(today.getFullYear(), today.getMonth() - 6, today.getDate());
+    function toIsoDate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return y + "-" + m + "-" + day;
+    }
+    fromInput.value = params.get("from") || toIsoDate(fromDefault);
+    toInput.value = params.get("to") || toIsoDate(today);
     if (params.get("cash")) {
       cashInput.value = params.get("cash");
     }
@@ -89,6 +101,149 @@
     if (params.get("sellConf")) {
       sellConfInput.value = params.get("sellConf");
     }
+  }
+
+  function setFindBestVisible(visible) {
+    if (bestStrategyActions) {
+      bestStrategyActions.hidden = !visible;
+    }
+  }
+
+  function renderBestStrategy(data) {
+    if (!bestStrategyLine) {
+      return;
+    }
+    const ticker = tickerSelect.value;
+    const from = fromInput.value;
+    const to = toInput.value;
+    if (!data || !data.found || !data.best) {
+      bestStrategyLine.textContent =
+        "No saved best strategy for " + ticker +
+        " with from/to within ±7 days of " + from + " → " + to + ".";
+      setFindBestVisible(true);
+      return;
+    }
+    const b = data.best;
+    const bh = b.buyHoldReturnPct == null
+      ? "—"
+      : formatPct(b.buyHoldReturnPct);
+    bestStrategyLine.textContent =
+      b.ticker + " · saved " + b.fromDate + " → " + b.toDate +
+      " · parts=" + b.parts +
+      " buyConf≥" + formatNum(b.minBuyConfidence, 2) +
+      " sellConf≥" + formatNum(b.minSellConfidence, 2) +
+      " BUY→" + b.onBuy +
+      " SELL→" + b.onSell +
+      " AVOID→" + b.onAvoid +
+      " · equity=" + formatMoney(b.endingEquity) +
+      " (" + formatPct(b.returnPct) + ")" +
+      " · buy&hold " + bh;
+    setFindBestVisible(false);
+  }
+
+  function loadBestStrategy() {
+    if (!bestStrategyLine) {
+      return Promise.resolve();
+    }
+    const ticker = tickerSelect.value;
+    const from = fromInput.value;
+    const to = toInput.value;
+    if (!ticker || !from || !to) {
+      bestStrategyLine.textContent =
+        "Select a ticker and dates to look up a saved optimize result.";
+      setFindBestVisible(false);
+      return Promise.resolve();
+    }
+
+    bestStrategyLine.textContent = "Looking up saved best strategy…";
+    setFindBestVisible(false);
+    const url = new URL("api/backtest/best-strategy", window.location.href);
+    url.searchParams.set("ticker", ticker);
+    url.searchParams.set("from", from);
+    url.searchParams.set("to", to);
+    url.searchParams.set("param", DEFAULT_PARAM_ID);
+
+    return fetch(url.toString(), { headers: { Accept: "application/json" } })
+      .then((response) => response.text().then((text) => {
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_) {
+          /* ignore */
+        }
+        if (!response.ok) {
+          throw new Error((data && data.error) || text || ("HTTP " + response.status));
+        }
+        return data;
+      }))
+      .then((data) => {
+        renderBestStrategy(data);
+      })
+      .catch((err) => {
+        bestStrategyLine.textContent = "Failed to load best strategy: " + err.message;
+        setFindBestVisible(true);
+      });
+  }
+
+  function runFindBestStrategy() {
+    const ticker = tickerSelect.value;
+    const from = fromInput.value;
+    const to = toInput.value;
+    if (!ticker || !from || !to) {
+      showError("Ticker, from, and to are required to find the best strategy.");
+      return;
+    }
+
+    clearError();
+    if (findBestBtn) {
+      findBestBtn.disabled = true;
+      findBestBtn.textContent = "Searching…";
+    }
+    bestStrategyLine.textContent =
+      "Running strategy search for " + ticker + " (" + from + " → " + to + ")… this can take a minute.";
+    setFindBestVisible(true);
+
+    fetch(apiUrl("api/backtest/optimize"), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ticker: ticker,
+        from: from,
+        to: to,
+        cash: Number(cashInput.value) || 10000,
+        top: 10,
+        param: Number(DEFAULT_PARAM_ID)
+      })
+    })
+      .then((response) => response.text().then((text) => {
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_) {
+          /* ignore */
+        }
+        if (!response.ok) {
+          throw new Error((data && data.error) || text || ("HTTP " + response.status));
+        }
+        return data;
+      }))
+      .then((data) => {
+        renderBestStrategy(data);
+      })
+      .catch((err) => {
+        bestStrategyLine.textContent = "Find best strategy failed: " + err.message;
+        setFindBestVisible(true);
+        showError("Find best strategy failed: " + err.message);
+      })
+      .finally(() => {
+        if (findBestBtn) {
+          findBestBtn.disabled = false;
+          findBestBtn.textContent = "Find Best Strategy";
+        }
+      });
   }
 
   function loadTickers() {
@@ -187,6 +342,8 @@
     runBtn.disabled = true;
     runBtn.textContent = "Running…";
 
+    loadBestStrategy();
+
     const payload = {
       ticker: tickerSelect.value,
       cash: Number(cashInput.value),
@@ -239,4 +396,10 @@
   loadTickers().catch((err) => {
     showError("Failed to load tickers: " + err.message);
   });
+
+  if (findBestBtn) {
+    findBestBtn.addEventListener("click", () => {
+      runFindBestStrategy();
+    });
+  }
 })();

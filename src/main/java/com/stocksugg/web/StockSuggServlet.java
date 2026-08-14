@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
         "/api/admin/*",
         "/api/batch",
         "/api/backtest",
+        "/api/backtest/*",
         "/api/tuning-params",
         "/suggest/*"
 })
@@ -79,7 +80,17 @@ public final class StockSuggServlet extends HttpServlet {
         }
 
         if ("/api/backtest".equals(path)) {
-            writeBacktestTickers(resp);
+            String segment = extractPathSegment(req.getPathInfo());
+            if (segment == null) {
+                writeBacktestTickers(resp);
+                return;
+            }
+            if ("best-strategy".equalsIgnoreCase(segment)) {
+                writeBacktestBestStrategy(req, resp);
+                return;
+            }
+            writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
+                    "error", "Unknown backtest path. Use /api/backtest or /api/backtest/best-strategy."));
             return;
         }
 
@@ -105,7 +116,17 @@ public final class StockSuggServlet extends HttpServlet {
             return;
         }
         if ("/api/backtest".equals(path)) {
-            writeBacktestRun(req, resp);
+            String segment = extractPathSegment(req.getPathInfo());
+            if (segment == null) {
+                writeBacktestRun(req, resp);
+                return;
+            }
+            if ("optimize".equalsIgnoreCase(segment)) {
+                writeBacktestOptimize(req, resp);
+                return;
+            }
+            writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
+                    "error", "Unknown backtest path. Use POST /api/backtest or /api/backtest/optimize."));
             return;
         }
         if ("/api/admin".equals(path)) {
@@ -211,6 +232,24 @@ public final class StockSuggServlet extends HttpServlet {
         }
     }
 
+    private static void writeBacktestBestStrategy(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(BacktestApi.bestStrategyJson(
+                    req.getParameter("ticker"),
+                    req.getParameter("from"),
+                    req.getParameter("to"),
+                    req.getParameter("param")));
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to load best strategy: " + e.getMessage()));
+        }
+    }
+
     private static void writeBacktestRun(HttpServletRequest req, HttpServletResponse resp)
             throws IOException {
         String body = req.getReader().lines().collect(Collectors.joining("\n"));
@@ -223,6 +262,21 @@ public final class StockSuggServlet extends HttpServlet {
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Backtest failed: " + e.getMessage()));
+        }
+    }
+
+    private static void writeBacktestOptimize(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String body = req.getReader().lines().collect(Collectors.joining("\n"));
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(BacktestApi.optimizeJson(body));
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Optimize failed: " + e.getMessage()));
         }
     }
 

@@ -1,10 +1,14 @@
 package com.stocksugg.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.stocksugg.App;
 import com.stocksugg.db.Database;
 import com.stocksugg.db.StockRepository;
+import com.stocksugg.db.StrategyOptimizeRepository;
 import com.stocksugg.stock.BacktestDay;
 import com.stocksugg.stock.BacktestStrategy;
+import com.stocksugg.stock.GeminiStockAdvisor;
+import com.stocksugg.stock.StrategyOptimize;
 import com.stocksugg.stock.SuggestionBacktester;
 import com.stocksugg.stock.TickerList;
 
@@ -15,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Runs one customized {@link BacktestStrategy} for the web UI
@@ -130,6 +135,145 @@ public final class BacktestApi {
         body.put("count", tickers.size());
         body.put("tickers", tickers);
         return SuggestApi.mapper().writeValueAsString(body);
+    }
+
+    /**
+     * Best saved {@code strategy_optimize} row for ticker whose window matches
+     * {@code from}/{@code to} within +/- 7 days (rank=1).
+     */
+    public static String bestStrategyJson(
+            String ticker, String fromRaw, String toRaw, String paramRaw) throws Exception {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String symbol = ticker.trim().toUpperCase(Locale.ROOT);
+        LocalDate from = parseDate(fromRaw, "from");
+        LocalDate to = parseDate(toRaw, "to");
+        if (from.isAfter(to)) {
+            throw new IllegalArgumentException("from must be on or before to");
+        }
+        long paramId = 1L;
+        if (paramRaw != null && !paramRaw.isBlank()) {
+            try {
+                paramId = Long.parseLong(paramRaw.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("param must be an integer");
+            }
+            if (paramId < 1) {
+                throw new IllegalArgumentException("param must be >= 1");
+            }
+        }
+
+        try (Database db = new Database()) {
+            StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+            Optional<StrategyOptimize> match =
+                    repo.findBestNearWindow(symbol, paramId, from, to, 7);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("ticker", symbol);
+            body.put("paramId", paramId);
+            body.put("requestedFrom", from.toString());
+            body.put("requestedTo", to.toString());
+            body.put("slackDays", 7);
+            body.put("found", match.isPresent());
+            if (match.isPresent()) {
+                body.put("best", toMap(match.get()));
+            } else {
+                body.put("best", null);
+            }
+            return SuggestApi.mapper().writeValueAsString(body);
+        }
+    }
+
+    /**
+     * Runs the same strategy grid-search as CLI {@code --optimize}, saves rank=1,
+     * and returns the saved row.
+     */
+    public static String optimizeJson(String requestBody) throws Exception {
+        JsonNode root = SuggestApi.mapper().readTree(requestBody == null ? "{}" : requestBody);
+
+        String ticker = text(root, "ticker");
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        LocalDate from = parseDate(text(root, "from"), "from");
+        LocalDate to = parseDate(text(root, "to"), "to");
+        if (from.isAfter(to)) {
+            throw new IllegalArgumentException("from must be on or before to");
+        }
+
+        double cash = number(root, "cash", 10_000.0);
+        if (cash <= 0) {
+            throw new IllegalArgumentException("cash must be > 0");
+        }
+
+        int topN = (int) Math.round(number(root, "top", 10));
+        if (topN < 1) {
+            throw new IllegalArgumentException("top must be >= 1");
+        }
+
+        long paramId = GeminiStockAdvisor.DEFAULT_PARAM_ID;
+        JsonNode paramNode = root.get("param");
+        if (paramNode == null || paramNode.isNull()) {
+            paramNode = root.get("paramId");
+        }
+        if (paramNode != null && !paramNode.isNull() && !paramNode.asText().isBlank()) {
+            try {
+                paramId = paramNode.isNumber()
+                        ? paramNode.asLong()
+                        : Long.parseLong(paramNode.asText().trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("param must be an integer");
+            }
+            if (paramId < 1) {
+                throw new IllegalArgumentException("param must be >= 1");
+            }
+        }
+
+        StrategyOptimize saved = App.optimizeAndSave(ticker, from, to, cash, topN, paramId);
+        // Re-read so id / computed_at match the DB row when available.
+        try (Database db = new Database()) {
+            StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+            saved = repo.findByKey(saved.ticker(), saved.paramId(), from, to, 1).orElse(saved);
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ticker", saved.ticker());
+        body.put("paramId", saved.paramId());
+        body.put("requestedFrom", from.toString());
+        body.put("requestedTo", to.toString());
+        body.put("found", true);
+        body.put("best", toMap(saved));
+        return SuggestApi.mapper().writeValueAsString(body);
+    }
+
+    private static Map<String, Object> toMap(StrategyOptimize row) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("id", row.id());
+        map.put("ticker", row.ticker());
+        map.put("paramId", row.paramId());
+        map.put("fromDate", row.fromDate().toString());
+        map.put("toDate", row.toDate().toString());
+        map.put("startingCash", row.startingCash());
+        map.put("parts", row.parts());
+        map.put("minBuyConfidence", row.minBuyConfidence());
+        map.put("minSellConfidence", row.minSellConfidence());
+        map.put("onBuy", row.onBuy());
+        map.put("onSell", row.onSell());
+        map.put("onHold", row.onHold());
+        map.put("onAvoid", row.onAvoid());
+        map.put("endingEquity", row.endingEquity());
+        map.put("endingCash", row.endingCash());
+        map.put("endingShares", row.endingShares());
+        map.put("lastClose", row.lastClose());
+        map.put("returnPct", row.returnPct());
+        map.put("buyCount", row.buyCount());
+        map.put("sellCount", row.sellCount());
+        map.put("skippedBuys", row.skippedBuys());
+        map.put("buyHoldEquity", row.buyHoldEquity());
+        map.put("buyHoldReturnPct", row.buyHoldReturnPct());
+        map.put("rank", row.rank());
+        map.put("computedAt", row.computedAt() == null ? null : row.computedAt().toString());
+        return map;
     }
 
     private static Map<String, Object> resultMap(SuggestionBacktester.Result result) {

@@ -59,6 +59,7 @@ class DatabaseTest {
              Statement stmt = db.connection().createStatement()) {
             assertTrue(db.tuningParamsTableExists());
             assertTrue(db.suggestionsTableExists());
+            assertTrue(db.strategyOptimizeTableExists());
 
             Set<String> paramCols = new HashSet<>();
             try (ResultSet rs = db.connection().getMetaData()

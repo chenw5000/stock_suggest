@@ -219,6 +219,21 @@ public final class WebServer {
                 }
             });
 
+            config.routes.get("/api/backtest/best-strategy", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(BacktestApi.bestStrategyJson(
+                            ctx.queryParam("ticker"),
+                            ctx.queryParam("from"),
+                            ctx.queryParam("to"),
+                            ctx.queryParam("param")));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Failed to load best strategy: " + e.getMessage()));
+                }
+            });
+
             config.routes.post("/api/backtest", ctx -> {
                 try {
                     ctx.contentType("application/json").result(BacktestApi.runJson(ctx.body()));
@@ -227,6 +242,17 @@ public final class WebServer {
                 } catch (Exception e) {
                     ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .json(Map.of("error", "Backtest failed: " + e.getMessage()));
+                }
+            });
+
+            config.routes.post("/api/backtest/optimize", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(BacktestApi.optimizeJson(ctx.body()));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Optimize failed: " + e.getMessage()));
                 }
             });
 
