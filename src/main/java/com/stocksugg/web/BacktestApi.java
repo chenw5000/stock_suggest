@@ -60,28 +60,9 @@ public final class BacktestApi {
             throw new IllegalArgumentException("confidence thresholds must be between 0 and 1");
         }
 
-        boolean sellOnSell = bool(root, "sellOnSell", true);
-        boolean sellOnAvoid = bool(root, "sellOnAvoid", true);
-        boolean sellAllOnAvoid = bool(root, "sellAllOnAvoid", false);
-
-        BacktestStrategy.TradeIntent buyIntent = parts == 1
-                ? BacktestStrategy.TradeIntent.BUY_ALL
-                : BacktestStrategy.TradeIntent.BUY_PART;
-        BacktestStrategy.TradeIntent sellIntent = sellOnSell
-                ? (parts == 1
-                        ? BacktestStrategy.TradeIntent.SELL_ALL
-                        : BacktestStrategy.TradeIntent.SELL_PART)
-                : BacktestStrategy.TradeIntent.NONE;
-        BacktestStrategy.TradeIntent avoidIntent;
-        if (sellAllOnAvoid) {
-            avoidIntent = BacktestStrategy.TradeIntent.SELL_ALL;
-        } else if (sellOnAvoid) {
-            avoidIntent = parts == 1
-                    ? BacktestStrategy.TradeIntent.SELL_ALL
-                    : BacktestStrategy.TradeIntent.SELL_PART;
-        } else {
-            avoidIntent = BacktestStrategy.TradeIntent.NONE;
-        }
+        BacktestStrategy.TradeIntent buyIntent = parseBuyIntent(text(root, "onBuy"), parts);
+        BacktestStrategy.TradeIntent sellIntent = parseExitIntent(text(root, "onSell"), parts, "onSell");
+        BacktestStrategy.TradeIntent avoidIntent = parseExitIntent(text(root, "onAvoid"), parts, "onAvoid");
 
         BacktestStrategy strategy = new BacktestStrategy(
                 parts,
@@ -115,9 +96,9 @@ public final class BacktestApi {
             body.put("parts", parts);
             body.put("minBuyConfidence", buyConf);
             body.put("minSellConfidence", sellConf);
-            body.put("sellOnSell", sellOnSell);
-            body.put("sellOnAvoid", sellOnAvoid);
-            body.put("sellAllOnAvoid", sellAllOnAvoid);
+            body.put("onBuy", buyIntent.name());
+            body.put("onSell", sellIntent.name());
+            body.put("onAvoid", avoidIntent.name());
             body.put("strategy", strategy.toString());
             body.put("tradingDays", days.size());
             body.put("daysWithAction", withAction);
@@ -126,6 +107,46 @@ public final class BacktestApi {
             body.put("trades", tradeMaps(result.trades()));
             return SuggestApi.mapper().writeValueAsString(body);
         }
+    }
+
+    /**
+     * BUY intent from request. Accepts {@code BUY_PART} / {@code BUY_ALL}.
+     * When omitted, defaults to BUY_PART (BUY_ALL only if parts == 1 for backward compatibility).
+     */
+    private static BacktestStrategy.TradeIntent parseBuyIntent(String raw, int parts) {
+        if (raw == null || raw.isBlank()) {
+            return parts == 1
+                    ? BacktestStrategy.TradeIntent.BUY_ALL
+                    : BacktestStrategy.TradeIntent.BUY_PART;
+        }
+        String value = raw.trim().toUpperCase(Locale.ROOT);
+        return switch (value) {
+            case "BUY_PART" -> BacktestStrategy.TradeIntent.BUY_PART;
+            case "BUY_ALL" -> BacktestStrategy.TradeIntent.BUY_ALL;
+            default -> throw new IllegalArgumentException(
+                    "onBuy must be BUY_PART or BUY_ALL");
+        };
+    }
+
+    /**
+     * Exit intent for SELL or AVOID. Accepts {@code SELL_PART}, {@code SELL_ALL}, or {@code NONE}
+     * (also {@code NO_ACTION}). When omitted, defaults to SELL_PART (SELL_ALL if parts == 1).
+     */
+    private static BacktestStrategy.TradeIntent parseExitIntent(
+            String raw, int parts, String fieldName) {
+        if (raw == null || raw.isBlank()) {
+            return parts == 1
+                    ? BacktestStrategy.TradeIntent.SELL_ALL
+                    : BacktestStrategy.TradeIntent.SELL_PART;
+        }
+        String value = raw.trim().toUpperCase(Locale.ROOT);
+        return switch (value) {
+            case "SELL_PART" -> BacktestStrategy.TradeIntent.SELL_PART;
+            case "SELL_ALL" -> BacktestStrategy.TradeIntent.SELL_ALL;
+            case "NONE", "NO_ACTION", "NOACTION" -> BacktestStrategy.TradeIntent.NONE;
+            default -> throw new IllegalArgumentException(
+                    fieldName + " must be SELL_PART, SELL_ALL, or NONE");
+        };
     }
 
     /** Watch-list tickers for the backtest form dropdown. */
@@ -329,24 +350,6 @@ public final class BacktestApi {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(field + " must be a number");
         }
-    }
-
-    private static boolean bool(JsonNode root, String field, boolean defaultValue) {
-        JsonNode node = root.get(field);
-        if (node == null || node.isNull()) {
-            return defaultValue;
-        }
-        if (node.isBoolean()) {
-            return node.asBoolean();
-        }
-        String text = node.asText().trim().toLowerCase(Locale.ROOT);
-        if ("true".equals(text) || "1".equals(text) || "yes".equals(text)) {
-            return true;
-        }
-        if ("false".equals(text) || "0".equals(text) || "no".equals(text)) {
-            return false;
-        }
-        throw new IllegalArgumentException(field + " must be true or false");
     }
 
     private static LocalDate parseDate(String raw, String field) {

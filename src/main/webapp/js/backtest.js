@@ -7,9 +7,9 @@
   const partsInput = document.getElementById("parts");
   const buyConfInput = document.getElementById("buy-conf");
   const sellConfInput = document.getElementById("sell-conf");
-  const sellOnSellInput = document.getElementById("sell-on-sell");
-  const sellOnAvoidInput = document.getElementById("sell-on-avoid");
-  const sellAllOnAvoidInput = document.getElementById("sell-all-on-avoid");
+  const onBuySelect = document.getElementById("on-buy");
+  const onSellSelect = document.getElementById("on-sell");
+  const onAvoidSelect = document.getElementById("on-avoid");
   const runBtn = document.getElementById("run-btn");
   const errorEl = document.getElementById("error");
   const meta = document.getElementById("meta");
@@ -20,11 +20,12 @@
   const tradesTable = document.getElementById("trades-table");
   const tradesBody = document.getElementById("trades-body");
   const bestStrategyLine = document.getElementById("best-strategy-line");
-  const bestStrategyActions = document.getElementById("best-strategy-actions");
   const findBestBtn = document.getElementById("find-best-btn");
+  const applyBestBtn = document.getElementById("apply-best-btn");
 
   const params = new URLSearchParams(window.location.search);
   const DEFAULT_PARAM_ID = "1";
+  let lastBestStrategy = null;
 
   function apiUrl(path) {
     return new URL(path, window.location.href).toString();
@@ -101,12 +102,78 @@
     if (params.get("sellConf")) {
       sellConfInput.value = params.get("sellConf");
     }
+    if (params.get("onBuy") && onBuySelect) {
+      onBuySelect.value = params.get("onBuy").toUpperCase();
+    }
+    if (params.get("onSell") && onSellSelect) {
+      const onSell = params.get("onSell").toUpperCase();
+      onSellSelect.value = onSell === "NO_ACTION" ? "NONE" : onSell;
+    }
+    if (params.get("onAvoid") && onAvoidSelect) {
+      const onAvoid = params.get("onAvoid").toUpperCase();
+      onAvoidSelect.value = onAvoid === "NO_ACTION" ? "NONE" : onAvoid;
+    }
   }
 
-  function setFindBestVisible(visible) {
-    if (bestStrategyActions) {
-      bestStrategyActions.hidden = !visible;
+  function setBestStrategyButtons(mode) {
+    // mode: "none" | "find" | "apply"
+    if (findBestBtn) {
+      findBestBtn.hidden = mode !== "find";
     }
+    if (applyBestBtn) {
+      applyBestBtn.hidden = mode !== "apply";
+    }
+  }
+
+  function setSelectValue(select, value) {
+    if (!select || value == null || value === "") {
+      return;
+    }
+    const normalized = String(value).toUpperCase();
+    const mapped = normalized === "NO_ACTION" ? "NONE" : normalized;
+    if ([...select.options].some((o) => o.value === mapped)) {
+      select.value = mapped;
+    }
+  }
+
+  function applyBestStrategyToForm(best) {
+    if (!best) {
+      showError("No best strategy to apply.");
+      return;
+    }
+    clearError();
+
+    if (best.ticker && tickerSelect) {
+      const ticker = String(best.ticker).toUpperCase();
+      if ([...tickerSelect.options].some((o) => o.value === ticker)) {
+        tickerSelect.value = ticker;
+      }
+    }
+    if (best.fromDate) {
+      fromInput.value = best.fromDate;
+    }
+    if (best.toDate) {
+      toInput.value = best.toDate;
+    }
+    if (best.startingCash != null && !Number.isNaN(Number(best.startingCash))) {
+      cashInput.value = String(Math.round(Number(best.startingCash)));
+    }
+    if (best.parts != null) {
+      partsInput.value = String(best.parts);
+    }
+    if (best.minBuyConfidence != null) {
+      buyConfInput.value = Number(best.minBuyConfidence).toFixed(2);
+    }
+    if (best.minSellConfidence != null) {
+      sellConfInput.value = Number(best.minSellConfidence).toFixed(2);
+    }
+    setSelectValue(onBuySelect, best.onBuy);
+    setSelectValue(onSellSelect, best.onSell);
+    setSelectValue(onAvoidSelect, best.onAvoid);
+
+    meta.textContent =
+      "Applied saved best strategy for " + (best.ticker || "") +
+      " (" + (best.fromDate || "") + " → " + (best.toDate || "") + "). Click Run backtest to simulate.";
   }
 
   function renderBestStrategy(data) {
@@ -117,13 +184,15 @@
     const from = fromInput.value;
     const to = toInput.value;
     if (!data || !data.found || !data.best) {
+      lastBestStrategy = null;
       bestStrategyLine.textContent =
         "No saved best strategy for " + ticker +
         " with from/to within ±7 days of " + from + " → " + to + ".";
-      setFindBestVisible(true);
+      setBestStrategyButtons("find");
       return;
     }
     const b = data.best;
+    lastBestStrategy = b;
     const bh = b.buyHoldReturnPct == null
       ? "—"
       : formatPct(b.buyHoldReturnPct);
@@ -138,7 +207,7 @@
       " · equity=" + formatMoney(b.endingEquity) +
       " (" + formatPct(b.returnPct) + ")" +
       " · buy&hold " + bh;
-    setFindBestVisible(false);
+    setBestStrategyButtons("apply");
   }
 
   function loadBestStrategy() {
@@ -149,14 +218,15 @@
     const from = fromInput.value;
     const to = toInput.value;
     if (!ticker || !from || !to) {
+      lastBestStrategy = null;
       bestStrategyLine.textContent =
         "Select a ticker and dates to look up a saved optimize result.";
-      setFindBestVisible(false);
+      setBestStrategyButtons("none");
       return Promise.resolve();
     }
 
     bestStrategyLine.textContent = "Looking up saved best strategy…";
-    setFindBestVisible(false);
+    setBestStrategyButtons("none");
     const url = new URL("api/backtest/best-strategy", window.location.href);
     url.searchParams.set("ticker", ticker);
     url.searchParams.set("from", from);
@@ -180,8 +250,9 @@
         renderBestStrategy(data);
       })
       .catch((err) => {
+        lastBestStrategy = null;
         bestStrategyLine.textContent = "Failed to load best strategy: " + err.message;
-        setFindBestVisible(true);
+        setBestStrategyButtons("find");
       });
   }
 
@@ -199,9 +270,10 @@
       findBestBtn.disabled = true;
       findBestBtn.textContent = "Searching…";
     }
+    lastBestStrategy = null;
     bestStrategyLine.textContent =
       "Running strategy search for " + ticker + " (" + from + " → " + to + ")… this can take a minute.";
-    setFindBestVisible(true);
+    setBestStrategyButtons("find");
 
     fetch(apiUrl("api/backtest/optimize"), {
       method: "POST",
@@ -234,8 +306,9 @@
         renderBestStrategy(data);
       })
       .catch((err) => {
+        lastBestStrategy = null;
         bestStrategyLine.textContent = "Find best strategy failed: " + err.message;
-        setFindBestVisible(true);
+        setBestStrategyButtons("find");
         showError("Find best strategy failed: " + err.message);
       })
       .finally(() => {
@@ -352,9 +425,9 @@
       parts: Number(partsInput.value),
       minBuyConfidence: Number(buyConfInput.value),
       minSellConfidence: Number(sellConfInput.value),
-      sellOnSell: !!sellOnSellInput.checked,
-      sellOnAvoid: !!sellOnAvoidInput.checked,
-      sellAllOnAvoid: !!sellAllOnAvoidInput.checked
+      onBuy: onBuySelect ? onBuySelect.value : "BUY_PART",
+      onSell: onSellSelect ? onSellSelect.value : "SELL_PART",
+      onAvoid: onAvoidSelect ? onAvoidSelect.value : "SELL_PART"
     };
 
     fetch(apiUrl("api/backtest"), {
@@ -400,6 +473,11 @@
   if (findBestBtn) {
     findBestBtn.addEventListener("click", () => {
       runFindBestStrategy();
+    });
+  }
+  if (applyBestBtn) {
+    applyBestBtn.addEventListener("click", () => {
+      applyBestStrategyToForm(lastBestStrategy);
     });
   }
 })();

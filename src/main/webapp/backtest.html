@@ -51,21 +51,32 @@
             <label for="sell-conf">Sell confidence ≥</label>
             <input id="sell-conf" name="sellConf" type="number" min="0" max="1" step="0.05" value="0.00" required>
           </div>
+          <div class="backtest-field">
+            <label for="on-buy">On BUY signal</label>
+            <select id="on-buy" name="onBuy" required>
+              <option value="BUY_PART" selected>BUY_PART (one bucket)</option>
+              <option value="BUY_ALL">BUY_ALL (deploy all cash)</option>
+            </select>
+          </div>
+          <div class="backtest-field">
+            <label for="on-sell">On SELL signal</label>
+            <select id="on-sell" name="onSell" required>
+              <option value="SELL_PART" selected>SELL_PART (one bucket)</option>
+              <option value="SELL_ALL">SELL_ALL (exit all shares)</option>
+              <option value="NONE">NO Action</option>
+            </select>
+          </div>
+          <div class="backtest-field">
+            <label for="on-avoid">On AVOID signal</label>
+            <select id="on-avoid" name="onAvoid" required>
+              <option value="SELL_PART" selected>SELL_PART (one bucket)</option>
+              <option value="SELL_ALL">SELL_ALL (exit all shares)</option>
+              <option value="NONE">NO Action</option>
+            </select>
+          </div>
         </div>
 
         <div class="backtest-row backtest-row-actions">
-          <label class="backtest-check">
-            <input id="sell-on-sell" type="checkbox" checked>
-            Sell on SELL signal
-          </label>
-          <label class="backtest-check">
-            <input id="sell-on-avoid" type="checkbox" checked>
-            Sell on AVOID signal (one part)
-          </label>
-          <label class="backtest-check">
-            <input id="sell-all-on-avoid" type="checkbox">
-            Sell ALL when signal is AVOID
-          </label>
           <div class="backtest-actions">
             <button type="submit" id="run-btn">Run backtest</button>
           </div>
@@ -76,8 +87,9 @@
     <section id="best-strategy" class="backtest-panel">
       <h2 class="section-title">Saved best strategy</h2>
       <p class="meta" id="best-strategy-line">Select a ticker and dates to look up a saved optimize result.</p>
-      <div class="backtest-actions" id="best-strategy-actions" hidden>
-        <button type="button" id="find-best-btn">Find Best Strategy</button>
+      <div class="backtest-actions" id="best-strategy-actions">
+        <button type="button" id="find-best-btn" hidden>Find Best Strategy</button>
+        <button type="button" id="apply-best-btn" hidden>Apply</button>
       </div>
     </section>
     <section id="results" class="backtest-results" hidden>
