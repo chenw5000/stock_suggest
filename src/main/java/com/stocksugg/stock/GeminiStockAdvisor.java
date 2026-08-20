@@ -56,17 +56,45 @@ public final class GeminiStockAdvisor {
             After writing thesis and risks, pick the single best-fitting action label.
             """;
 
+            // NOTE: Extreme condition: HOLD means TRAIL STOP / HOLD.
+            // NOTE: Extreme condition: AVOID means TAKE PROFIT / AVOID.
     public static final String SYSTEM_INSTRUCTION = """
             Use only provided OHLCV/indicators. No invented quotes. Return JSON schema.
+
             If data is insufficient for a package, action=NA and explain for that package.
             Price ranges must be grounded in the supplied prices/levels (entryPriceRange,
             cutlossPriceRange, profitTakingPriceRange). confidence is 0.0-1.0.
+
             When multiple stock packages are provided, return exactly one suggestion object
             per package in the suggestions array. Each package has ticker + asOf — copy that
             asOf into the suggestion, keep packages independent, and do not use later data.
             When the package includes indicatorWeights, honor them: 0 means ignore that
             indicator; higher weight means give it more influence on thesis and action.
             Weights are relative priorities, not numeric multipliers of prices.
+
+            CRITICAL EXHAUSTION FILTER: If the final rows of the 20-day data payload exhibit 
+            extreme terminal oversold parameters (specifically: CMO below -50, RSI below 20, 
+            and CMF below -0.20), you must classify this as a "Capitulation Exhaustion Zone." 
+            In this state, do not issue a Continuation Downward / Sell recommendation. 
+            Instead, categorize the asset as "Awaiting Reversal Confirmation." 
+            You are only permitted to issue a BUY suggestion if the final candlestick row 
+            demonstrates a positive closing price return backed by above-average daily volume.
+
+            CRITICAL PARABOLIC EXHAUSTION FILTER: You must evaluate if the stock has decoupled 
+            from its moving average structure. If the final rows of the 20-day data payload 
+            exhibit extreme upper boundary readings (specifically: CMO above +50, RSI above 80, 
+            and the Close price is stretched more than 15% above the 20MA), 
+            you must classify this as a "Parabolic Blow-off Top Danger Zone." 
+
+            In this state, you are STRICTLY FORBIDDEN from issuing a "Buy" or "Strong Buy" 
+            recommendation, regardless of how strong the upward trajectory looks. 
+            Instead, your output must prioritize Capital Preservation:
+            1. If the current Close price is still above the MA5, issue a "HOLD" 
+               stance, advising the user to protect open profits.
+            2. If the current Close price has crossed and closed below the MA5, or if a clear 
+               Bearish Divergence is visible (Price making higher highs while RSI/CMO make 
+               lower highs over the 20-day window), you must issue an "AVOID" 
+               stance, signaling a definitive near-term trend breakdown.
 
             """ + ACTION_DEFINITIONS;
 
@@ -340,6 +368,10 @@ public final class GeminiStockAdvisor {
                    - Potential Risks
                    - Potential Rewards
                 - Summarize and provide a final recommendation based on the analysis.
+                - EXTREME CONDITION NOTE: If the final rows trigger either the Capitulation Exhaustion Zone \
+(CMO < -50, RSI < 20, CMF < -0.20) or the Parabolic Blow-off Top Danger Zone \
+(CMO > +50, RSI > 80, Close > 15% above 20MA), explicitly state which extreme condition was detected \
+at the start of the thesis, including the actual indicator values that triggered it.
 
                 Based on the thesis and risks, set action using these definitions:
                 """ + ACTION_DEFINITIONS + """

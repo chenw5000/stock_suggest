@@ -116,12 +116,12 @@
   }
 
   function setBestStrategyButtons(mode) {
-    // mode: "none" | "find" | "apply"
+    // mode: "none" | "find" | "both" — Find Best Strategy stays visible so users can re-run.
     if (findBestBtn) {
-      findBestBtn.hidden = mode !== "find";
+      findBestBtn.hidden = false;
     }
     if (applyBestBtn) {
-      applyBestBtn.hidden = mode !== "apply";
+      applyBestBtn.hidden = mode !== "both";
     }
   }
 
@@ -207,7 +207,7 @@
       " · equity=" + formatMoney(b.endingEquity) +
       " (" + formatPct(b.returnPct) + ")" +
       " · buy&hold " + bh;
-    setBestStrategyButtons("apply");
+    setBestStrategyButtons("both");
   }
 
   function loadBestStrategy() {

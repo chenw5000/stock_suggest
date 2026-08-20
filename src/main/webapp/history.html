@@ -26,6 +26,15 @@
         <canvas id="history-chart"></canvas>
       </div>
     </section>
+    <section id="best-strategy" class="backtest-panel best-strategy-panel">
+      <div class="best-strategy-header">
+        <h2 class="section-title">Best strategy (recent 3 months)</h2>
+        <div class="backtest-actions" id="best-strategy-actions" hidden>
+          <a id="best-strategy-backtest-link" href="backtest.html">Open in backtest</a>
+        </div>
+      </div>
+      <p class="meta" id="best-strategy-line">Select a ticker to look up a saved optimize result.</p>
+    </section>
     <div class="table-wrap" id="table-wrap">
       <p class="empty" id="empty" hidden>No history rows found for this ticker.</p>
       <table id="history-table" hidden>

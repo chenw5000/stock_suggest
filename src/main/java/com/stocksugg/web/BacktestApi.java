@@ -173,17 +173,7 @@ public final class BacktestApi {
         if (from.isAfter(to)) {
             throw new IllegalArgumentException("from must be on or before to");
         }
-        long paramId = 1L;
-        if (paramRaw != null && !paramRaw.isBlank()) {
-            try {
-                paramId = Long.parseLong(paramRaw.trim());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("param must be an integer");
-            }
-            if (paramId < 1) {
-                throw new IllegalArgumentException("param must be >= 1");
-            }
-        }
+        long paramId = parseParamId(paramRaw);
 
         try (Database db = new Database()) {
             StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
@@ -203,6 +193,57 @@ public final class BacktestApi {
             }
             return SuggestApi.mapper().writeValueAsString(body);
         }
+    }
+
+    /**
+     * Best strategy for the recent ~3-month window ending today: look up a saved
+     * {@code strategy_optimize} row whose from/to are each within {@code +/- 7} days
+     * of that window (so {@code to} is within one week of today). If none exists,
+     * run the same optimize-and-save path as {@link #optimizeJson(String)}.
+     */
+    public static String recentBestStrategyJson(String ticker, String paramRaw) throws Exception {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String symbol = ticker.trim().toUpperCase(Locale.ROOT);
+        long paramId = parseParamId(paramRaw);
+
+        LocalDate to = LocalDate.now();
+        LocalDate from = to.minusMonths(3);
+        final int slackDays = 7;
+        final double cash = 10_000.0;
+        final int topN = 10;
+
+        StrategyOptimize best = null;
+        boolean computed = false;
+        try (Database db = new Database()) {
+            StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+            Optional<StrategyOptimize> match =
+                    repo.findBestNearWindow(symbol, paramId, from, to, slackDays);
+            if (match.isPresent()) {
+                best = match.get();
+            }
+        }
+        if (best == null) {
+            best = App.optimizeAndSave(symbol, from, to, cash, topN, paramId);
+            computed = true;
+            try (Database db = new Database()) {
+                StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+                best = repo.findByKey(best.ticker(), best.paramId(), from, to, 1).orElse(best);
+            }
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ticker", symbol);
+        body.put("paramId", paramId);
+        body.put("requestedFrom", from.toString());
+        body.put("requestedTo", to.toString());
+        body.put("months", 3);
+        body.put("slackDays", slackDays);
+        body.put("found", true);
+        body.put("computed", computed);
+        body.put("best", toMap(best));
+        return SuggestApi.mapper().writeValueAsString(body);
     }
 
     /**
@@ -238,16 +279,9 @@ public final class BacktestApi {
             paramNode = root.get("paramId");
         }
         if (paramNode != null && !paramNode.isNull() && !paramNode.asText().isBlank()) {
-            try {
-                paramId = paramNode.isNumber()
-                        ? paramNode.asLong()
-                        : Long.parseLong(paramNode.asText().trim());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("param must be an integer");
-            }
-            if (paramId < 1) {
-                throw new IllegalArgumentException("param must be >= 1");
-            }
+            paramId = parseParamId(paramNode.isNumber()
+                    ? Long.toString(paramNode.asLong())
+                    : paramNode.asText());
         }
 
         StrategyOptimize saved = App.optimizeAndSave(ticker, from, to, cash, topN, paramId);
@@ -349,6 +383,21 @@ public final class BacktestApi {
             return node.isNumber() ? node.asDouble() : Double.parseDouble(node.asText().trim());
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(field + " must be a number");
+        }
+    }
+
+    private static long parseParamId(String paramRaw) {
+        if (paramRaw == null || paramRaw.isBlank()) {
+            return GeminiStockAdvisor.DEFAULT_PARAM_ID;
+        }
+        try {
+            long paramId = Long.parseLong(paramRaw.trim());
+            if (paramId < 1) {
+                throw new IllegalArgumentException("param must be >= 1");
+            }
+            return paramId;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("param must be an integer");
         }
     }
 

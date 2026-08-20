@@ -16,6 +16,9 @@
   const chartWrap = document.getElementById("history-chart-wrap");
   const chartTitle = document.getElementById("history-chart-title");
   const chartCanvas = document.getElementById("history-chart");
+  const bestStrategyLine = document.getElementById("best-strategy-line");
+  const bestStrategyActions = document.getElementById("best-strategy-actions");
+  const bestStrategyBacktestLink = document.getElementById("best-strategy-backtest-link");
   let priceChart = null;
 
   const ticker = (params.get("ticker") || "").trim().toUpperCase();
@@ -195,6 +198,135 @@
     });
   }
 
+  function formatMoney(value) {
+    if (value == null || Number.isNaN(value)) {
+      return "—";
+    }
+    return Number(value).toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0
+    });
+  }
+
+  function formatPct(value) {
+    if (value == null || Number.isNaN(value)) {
+      return "—";
+    }
+    const sign = value > 0 ? "+" : "";
+    return sign + formatNum(value) + "%";
+  }
+
+  function backtestUrlFromBest(best) {
+    const url = new URL("backtest.html", window.location.href);
+    if (best.ticker) {
+      url.searchParams.set("ticker", best.ticker);
+    }
+    if (best.fromDate) {
+      url.searchParams.set("from", best.fromDate);
+    }
+    if (best.toDate) {
+      url.searchParams.set("to", best.toDate);
+    }
+    if (best.startingCash != null) {
+      url.searchParams.set("cash", String(Math.round(Number(best.startingCash))));
+    }
+    if (best.parts != null) {
+      url.searchParams.set("parts", String(best.parts));
+    }
+    if (best.minBuyConfidence != null) {
+      url.searchParams.set("buyConf", Number(best.minBuyConfidence).toFixed(2));
+    }
+    if (best.minSellConfidence != null) {
+      url.searchParams.set("sellConf", Number(best.minSellConfidence).toFixed(2));
+    }
+    if (best.onBuy) {
+      url.searchParams.set("onBuy", best.onBuy);
+    }
+    if (best.onSell) {
+      url.searchParams.set("onSell", best.onSell);
+    }
+    if (best.onAvoid) {
+      url.searchParams.set("onAvoid", best.onAvoid);
+    }
+    return url.pathname + url.search;
+  }
+
+  function renderBestStrategy(data) {
+    if (!bestStrategyLine) {
+      return;
+    }
+    if (!data || !data.found || !data.best) {
+      bestStrategyLine.textContent =
+        "No best strategy available for the recent 3-month window.";
+      if (bestStrategyActions) {
+        bestStrategyActions.hidden = true;
+      }
+      return;
+    }
+    const b = data.best;
+    const bh = b.buyHoldReturnPct == null ? "—" : formatPct(b.buyHoldReturnPct);
+    const source = data.computed
+      ? "just optimized"
+      : "saved";
+    bestStrategyLine.textContent =
+      b.ticker + " · " + source + " " + b.fromDate + " → " + b.toDate +
+      " · parts=" + b.parts +
+      " buyConf≥" + formatNum(b.minBuyConfidence) +
+      " sellConf≥" + formatNum(b.minSellConfidence) +
+      " BUY→" + b.onBuy +
+      " SELL→" + b.onSell +
+      " AVOID→" + b.onAvoid +
+      " · equity=" + formatMoney(b.endingEquity) +
+      " (" + formatPct(b.returnPct) + ")" +
+      " · buy&hold " + bh;
+    if (bestStrategyBacktestLink) {
+      bestStrategyBacktestLink.href = backtestUrlFromBest(b);
+    }
+    if (bestStrategyActions) {
+      bestStrategyActions.hidden = false;
+    }
+  }
+
+  function loadBestStrategy(symbol) {
+    if (!bestStrategyLine) {
+      return Promise.resolve();
+    }
+    bestStrategyLine.textContent =
+      "Looking up best strategy for the recent 3 months (to within 1 week of today)…";
+    if (bestStrategyActions) {
+      bestStrategyActions.hidden = true;
+    }
+    const url = new URL("api/backtest/best-strategy-recent", window.location.href);
+    url.searchParams.set("ticker", symbol);
+    url.searchParams.set("param", DEFAULT_PARAM_ID);
+
+    return fetch(url.toString(), { headers: { Accept: "application/json" } })
+      .then(async (response) => {
+        const text = await response.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_) {
+          /* ignore */
+        }
+        if (!response.ok) {
+          throw new Error((data && data.error) || text || ("HTTP " + response.status));
+        }
+        return data;
+      })
+      .then((data) => {
+        renderBestStrategy(data);
+      })
+      .catch((err) => {
+        bestStrategyLine.textContent =
+          "Failed to load best strategy: " + err.message;
+        if (bestStrategyActions) {
+          bestStrategyActions.hidden = true;
+        }
+      });
+  }
+
   function chartApiUrl(symbol) {
     const url = new URL(
       "api/chart/" + encodeURIComponent(symbol),
@@ -370,10 +502,14 @@
     meta.textContent = "Enter a ticker to view recent history.";
     emptyEl.hidden = false;
     emptyEl.textContent = "Choose a ticker above to load history.";
+    if (bestStrategyLine) {
+      bestStrategyLine.textContent = "Select a ticker to look up a saved optimize result.";
+    }
     setSuggestLink();
   } else {
     meta.textContent = ticker + " · loading…";
     loadChart(ticker);
+    loadBestStrategy(ticker);
 
     fetch(apiUrl(ticker, page), { headers: { Accept: "application/json" } })
       .then(async (response) => {

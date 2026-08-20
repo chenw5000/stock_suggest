@@ -478,6 +478,29 @@ td.admin-value-cell {
   max-width: 72rem;
 }
 
+.best-strategy-panel {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.best-strategy-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.best-strategy-header .section-title {
+  margin: 0;
+}
+
+.best-strategy-panel > .meta {
+  margin-bottom: 0;
+}
+
 .backtest-form {
   display: flex;
   flex-direction: column;
@@ -545,7 +568,8 @@ td.admin-value-cell {
   justify-self: end;
 }
 
-.backtest-actions button {
+.backtest-actions button,
+.backtest-actions a {
   background: #1e3a4f;
   color: var(--accent);
   border: 1px solid #2f5670;
@@ -555,9 +579,12 @@ td.admin-value-cell {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  text-decoration: none;
+  display: inline-block;
 }
 
-.backtest-actions button:hover {
+.backtest-actions button:hover,
+.backtest-actions a:hover {
   background: #25485f;
 }
 

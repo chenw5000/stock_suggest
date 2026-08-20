@@ -30,6 +30,10 @@ public final class PriceRangeParser {
         if (action == null || action.isBlank()) {
             return "AVOID";
         }
+        if (action.length() > 16) {
+            System.out.println("Action too long: " + action);
+            return action.substring(0, 16);
+        }
         return action.trim().toUpperCase(Locale.ROOT);
     }
 }

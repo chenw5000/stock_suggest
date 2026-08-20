@@ -27,10 +27,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.sql.SQLException;
 
 public class App {
 
-    private static final long BACKFILL_MONTH_WAIT_MILLIS = 2 * 60 * 1000L;
+    private static final long BACKFILL_MONTH_WAIT_MILLIS = 70 * 1000L;
     /** Gemini daily advice: tickers per API call. */
     private static final int BATCH_ADVICE_CHUNK_SIZE = 10;
     /** Pause between Gemini advice chunks to avoid rate limits. */
@@ -156,7 +157,7 @@ public class App {
             backfillSuggestionsForRange(ticker, range.from(), range.to(), paramId);
 
             if (i < ranges.size() - 1) {
-                System.out.println("Waiting 2 minutes for Gemini cooldown...");
+                System.out.println("Waiting 70 seconds for Gemini cooldown...");
                 try {
                     Thread.sleep(BACKFILL_MONTH_WAIT_MILLIS);
                 } catch (InterruptedException e) {
@@ -203,7 +204,7 @@ public class App {
         System.out.println("Backfilling Gemini suggestions for " + symbol
                 + " from " + from + " to " + to + " (param_id=" + paramId + ") ...");
         try (Database db = new Database();
-             GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.1-flash-lite"))) {
+             GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.5-flash-lite"))) {
             StockRepository repository = new StockRepository(db);
             GeminiStockAdvisor advisor = new GeminiStockAdvisor(db, gemini);
             List<LocalDate> dates = repository.findDatesInRange(symbol, from, to);
@@ -475,6 +476,22 @@ public class App {
 
             SuggestionStrategyOptimizer.Candidate best = report.top().getFirst();
             StrategyOptimizeRepository optimizeRepo = new StrategyOptimizeRepository(db);
+            Optional<StrategyOptimize> existing = optimizeRepo.findBestNearWindow(
+                    symbol, paramId, from, to, 7);
+            existing.ifPresent(old -> {
+                try {
+                    int removed = optimizeRepo.deleteByWindow(
+                            old.ticker(), old.paramId(), old.fromDate(), old.toDate());
+                    if (removed > 0) {
+                        System.out.println("Replaced prior saved strategy for "
+                                + old.ticker() + " " + old.fromDate() + " .. " + old.toDate()
+                                + " (" + removed + " row(s) deleted)");
+                    }
+                } catch (SQLException e) {
+                    throw new IllegalStateException(
+                            "Failed to delete prior strategy_optimize row: " + e.getMessage(), e);
+                }
+            });
             StrategyOptimize bestRow = StrategyOptimize.fromSearch(
                     symbol,
                     paramId,

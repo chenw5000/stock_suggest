@@ -73,4 +73,46 @@ class StrategyOptimizeRepositoryTest {
                     "AAPL", 1L, from.plusDays(14), to, 7).isEmpty());
         }
     }
+
+    @Test
+    void deleteByWindowRemovesPriorResultBeforeReplace() throws Exception {
+        try (Database db = new Database("jdbc:h2:mem:strategy_optimize_delete;DB_CLOSE_DELAY=-1")) {
+            StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+            LocalDate oldFrom = LocalDate.parse("2026-01-03");
+            LocalDate oldTo = LocalDate.parse("2026-08-10");
+            LocalDate newFrom = LocalDate.parse("2026-01-01");
+            LocalDate newTo = LocalDate.parse("2026-08-14");
+
+            BacktestStrategy strategy = new BacktestStrategy(
+                    4, 0.55, 0.60,
+                    BacktestStrategy.TradeIntent.BUY_PART,
+                    BacktestStrategy.TradeIntent.SELL_ALL,
+                    BacktestStrategy.TradeIntent.NONE,
+                    BacktestStrategy.TradeIntent.SELL_PART);
+            SuggestionBacktester.Result result = new SuggestionBacktester.Result(
+                    10_000.0, 2_500.0, 50, 150.0, 10_000.0, 0.0,
+                    3, 2, 1, List.of());
+            SuggestionBacktester.Result buyHold = new SuggestionBacktester.Result(
+                    10_000.0, 0.0, 70, 140.0, 9_800.0, -2.0,
+                    1, 0, 0, List.of());
+
+            repo.upsert(StrategyOptimize.fromSearch(
+                    "IGV", 1L, oldFrom, oldTo, 10_000.0, strategy, result, buyHold, 1));
+            assertTrue(repo.findBestNearWindow("IGV", 1L, newFrom, newTo, 7).isPresent());
+
+            assertEquals(1, repo.deleteByWindow("IGV", 1L, oldFrom, oldTo));
+            assertTrue(repo.findBestNearWindow("IGV", 1L, newFrom, newTo, 7).isEmpty());
+
+            SuggestionBacktester.Result better = new SuggestionBacktester.Result(
+                    10_000.0, 1_000.0, 80, 160.0, 12_000.0, 20.0,
+                    5, 1, 0, List.of());
+            repo.upsert(StrategyOptimize.fromSearch(
+                    "IGV", 1L, newFrom, newTo, 10_000.0, strategy, better, buyHold, 1));
+
+            Optional<StrategyOptimize> loaded = repo.findByKey("IGV", 1L, newFrom, newTo, 1);
+            assertTrue(loaded.isPresent());
+            assertEquals(12_000.0, loaded.get().endingEquity(), 1e-9);
+            assertTrue(repo.findByKey("IGV", 1L, oldFrom, oldTo, 1).isEmpty());
+        }
+    }
 }

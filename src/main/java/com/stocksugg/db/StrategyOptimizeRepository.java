@@ -72,6 +72,11 @@ public final class StrategyOptimizeRepository {
             buy_hold_equity, buy_hold_return_pct, rank, computed_at
             """;
 
+    private static final String DELETE_BY_WINDOW = """
+            DELETE FROM strategy_optimize
+            WHERE ticker = ? AND param_id = ? AND from_date = ? AND to_date = ?
+            """;
+
     private static final String SELECT_BY_KEY =
             "SELECT " + SELECT_COLUMNS
                     + "FROM strategy_optimize "
@@ -125,6 +130,22 @@ public final class StrategyOptimizeRepository {
             return updated;
         }
         return insert(row);
+    }
+
+    /**
+     * Removes all ranked rows for one ticker window. Used before re-running optimize
+     * so a new search replaces the prior saved result.
+     */
+    public int deleteByWindow(
+            String ticker, long paramId, LocalDate fromDate, LocalDate toDate)
+            throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(DELETE_BY_WINDOW)) {
+            ps.setString(1, normalizeTicker(ticker));
+            ps.setLong(2, paramId);
+            ps.setDate(3, java.sql.Date.valueOf(fromDate));
+            ps.setDate(4, java.sql.Date.valueOf(toDate));
+            return ps.executeUpdate();
+        }
     }
 
     public Optional<StrategyOptimize> findByKey(

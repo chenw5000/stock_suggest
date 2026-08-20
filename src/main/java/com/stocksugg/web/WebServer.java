@@ -234,6 +234,21 @@ public final class WebServer {
                 }
             });
 
+            config.routes.get("/api/backtest/best-strategy-recent", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(BacktestApi.recentBestStrategyJson(
+                            ctx.queryParam("ticker"),
+                            ctx.queryParam("param")));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of(
+                                    "error",
+                                    "Failed to resolve recent best strategy: " + e.getMessage()));
+                }
+            });
+
             config.routes.post("/api/backtest", ctx -> {
                 try {
                     ctx.contentType("application/json").result(BacktestApi.runJson(ctx.body()));

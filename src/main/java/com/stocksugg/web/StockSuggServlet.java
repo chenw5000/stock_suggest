@@ -89,8 +89,14 @@ public final class StockSuggServlet extends HttpServlet {
                 writeBacktestBestStrategy(req, resp);
                 return;
             }
+            if ("best-strategy-recent".equalsIgnoreCase(segment)) {
+                writeBacktestRecentBestStrategy(req, resp);
+                return;
+            }
             writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
-                    "error", "Unknown backtest path. Use /api/backtest or /api/backtest/best-strategy."));
+                    "error",
+                    "Unknown backtest path. Use /api/backtest, /api/backtest/best-strategy, "
+                            + "or /api/backtest/best-strategy-recent."));
             return;
         }
 
@@ -247,6 +253,22 @@ public final class StockSuggServlet extends HttpServlet {
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Failed to load best strategy: " + e.getMessage()));
+        }
+    }
+
+    private static void writeBacktestRecentBestStrategy(
+            HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        try {
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(BacktestApi.recentBestStrategyJson(
+                    req.getParameter("ticker"),
+                    req.getParameter("param")));
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to resolve recent best strategy: " + e.getMessage()));
         }
     }
 
