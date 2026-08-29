@@ -18,6 +18,8 @@ This is a research / educational tool, not investment advice.
 | **Apache Tomcat** | **10.1.x** (Jakarta Servlet 6). Deploy the built WAR into `webapps/` |
 | **Gemini API key** | Required for suggestion generation; store it as admin property `GEMINI_API_KEY` (or set env `GEMINI_API_KEY` / `GOOGLE_API_KEY`) |
 
+**Full install guide (Cursor, Claude Code, CI):** [docs/INSTALL.md](docs/INSTALL.md)
+
 Optional for local CLI-only use: you can also run the batch job with Maven `exec:java` without Tomcat; the UI still expects Tomcat (or embedded Javalin via `--embedded` for dev).
 
 ---
@@ -107,7 +109,7 @@ Other CLI options:
 The symbols Yahoo downloads and Gemini advises come from the **admin** table key `TICKERS`.
 
 - **Format:** comma-separated tickers, e.g. `AAPL,TSLA,MSFT,NVDA`
-- **Limit:** at most **20** symbols
+- **Limit:** at most **100** symbols
 - **Where to edit:** open `admin.html` → edit the **TICKERS** row’s value → **Update**
 
 Example via API:

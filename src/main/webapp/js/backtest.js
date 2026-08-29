@@ -334,7 +334,8 @@
         return data;
       }))
       .then((data) => {
-        const tickers = data.tickers || [];
+        const tickers = [...(data.tickers || [])]
+          .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" }));
         tickerSelect.innerHTML = tickers.map((t) =>
           '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>"
         ).join("");
