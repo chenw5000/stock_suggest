@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 @WebServlet(name = "StockSuggServlet", urlPatterns = {
         "/health",
         "/api/suggest/*",
+        "/api/suggestSummary/*",
         "/api/history/*",
         "/api/chart/*",
         "/api/admin",
@@ -54,8 +55,13 @@ public final class StockSuggServlet extends HttpServlet {
             if (isAdjacentSuggestPath(req.getPathInfo())) {
                 writeAdjacentSuggestApi(req, resp);
             } else {
-                writeSuggestApi(req, resp);
+                writeSuggestApi(req, resp, false);
             }
+            return;
+        }
+
+        if ("/api/suggestSummary".equals(path)) {
+            writeSuggestApi(req, resp, true);
             return;
         }
 
@@ -368,12 +374,13 @@ public final class StockSuggServlet extends HttpServlet {
         }
     }
 
-    private static void writeSuggestApi(HttpServletRequest req, HttpServletResponse resp)
-            throws IOException {
+    private static void writeSuggestApi(
+            HttpServletRequest req, HttpServletResponse resp, boolean summary) throws IOException {
         String rawDate = extractPathSegment(req.getPathInfo());
         if (rawDate == null) {
+            String base = summary ? "/api/suggestSummary/" : "/api/suggest/";
             writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of(
-                    "error", "Missing date. Use /api/suggest/yyyy-MM-dd?param=1."));
+                    "error", "Missing date. Use " + base + "yyyy-MM-dd?param=1."));
             return;
         }
 
@@ -391,7 +398,9 @@ public final class StockSuggServlet extends HttpServlet {
         try {
             resp.setStatus(HttpServletResponse.SC_OK);
             resp.setContentType("application/json; charset=UTF-8");
-            resp.getWriter().write(SuggestApi.suggestionsJson(date, paramId));
+            resp.getWriter().write(summary
+                    ? SuggestApi.suggestSummaryJson(date, paramId)
+                    : SuggestApi.suggestionsJson(date, paramId));
         } catch (Exception e) {
             writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
                     "error", "Failed to load suggestions: " + e.getMessage()));

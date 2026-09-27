@@ -38,7 +38,7 @@ fi
 
 WAR="$REPO_ROOT/target/stocksugg.war"
 if [[ ! -f "$WAR" ]]; then
-  echo "Error: missing $WAR — run mvn -DskipTests package first." >&2
+  echo "Error: missing $WAR - run mvn -DskipTests package first." >&2
   exit 1
 fi
 

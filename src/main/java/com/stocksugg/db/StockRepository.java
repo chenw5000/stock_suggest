@@ -139,6 +139,39 @@ public final class StockRepository {
             ) prev ON s.ticker = prev.ticker AND s."date" = prev.prev_date
             """;
 
+    /** RSI at or above this marks an AVOID as overextended ({@code avoidSide = HIGH}). */
+    private static final float AVOID_HIGH_RSI = 60f;
+
+    /** Close above {@code ma20 * this} marks an AVOID as overextended ({@code avoidSide = HIGH}). */
+    private static final float AVOID_HIGH_MA20_STRETCH = 1.05f;
+
+    /**
+     * Most recent {@code n} trading days (ending on {@code date}) of suggestion labels for each
+     * ticker that has a row on {@code date}, oldest first within each ticker.
+     * {@code avoidSide} splits AVOID into HIGH (overextended / take profit) and LOW (weak / broken)
+     * from that day's indicators; it is null for other actions or when indicators are missing.
+     */
+    private static final String SELECT_RECENT_ACTIONS = """
+            SELECT ticker, "date", suggestedAction, avoidSide
+            FROM (
+                SELECT s.ticker, s."date",
+                       g.suggestedaction AS suggestedAction,
+                       CASE
+                           WHEN g.suggestedaction IS NULL OR g.suggestedaction <> 'AVOID' THEN NULL
+                           WHEN s.rsi14 >= ? OR s.close > s.ma20 * ? THEN 'HIGH'
+                           WHEN s.rsi14 IS NULL AND (s.close IS NULL OR s.ma20 IS NULL) THEN NULL
+                           ELSE 'LOW'
+                       END AS avoidSide,
+                       ROW_NUMBER() OVER (PARTITION BY s.ticker ORDER BY s."date" DESC) AS rn
+                FROM stock s
+                LEFT JOIN suggestions g ON g.stock_id = s.id AND g.param_id = ?
+                WHERE s."date" <= ?
+                  AND s.ticker IN (SELECT ticker FROM stock WHERE "date" = ?)
+            ) recent
+            WHERE rn <= ?
+            ORDER BY ticker, "date"
+            """;
+
     private static final String SELECT_HISTORY_PAGE = """
             SELECT id, ticker, "date", open, high, low, close,
                    ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF,
@@ -558,6 +591,35 @@ public final class StockRepository {
             }
         }
         return closes;
+    }
+
+    /**
+     * Last {@code days} trading days of {@code suggestedAction} (for {@code paramId}) up to and
+     * including {@code date}, for each ticker that has a row on {@code date}. Keyed by ticker;
+     * each list is oldest first with {@code date}, {@code suggestedAction} and {@code avoidSide}
+     * ({@code HIGH} / {@code LOW} for AVOID, otherwise null) entries.
+     */
+    public Map<String, List<Map<String, Object>>> findRecentActions(
+            LocalDate date, long paramId, int days) throws SQLException {
+        Map<String, List<Map<String, Object>>> byTicker = new HashMap<>();
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_RECENT_ACTIONS)) {
+            ps.setFloat(1, AVOID_HIGH_RSI);
+            ps.setFloat(2, AVOID_HIGH_MA20_STRETCH);
+            ps.setLong(3, paramId);
+            ps.setString(4, date.toString());
+            ps.setString(5, date.toString());
+            ps.setInt(6, days);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("date", rs.getString("date"));
+                    entry.put("suggestedAction", rs.getString("suggestedAction"));
+                    entry.put("avoidSide", rs.getString("avoidSide"));
+                    byTicker.computeIfAbsent(rs.getString("ticker"), k -> new ArrayList<>()).add(entry);
+                }
+            }
+        }
+        return byTicker;
     }
 
     /**

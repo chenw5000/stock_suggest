@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockSugg — suggestion summary</title>
+  <link rel="stylesheet" href="css/suggest.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <h1>Suggestion summary</h1>
+        <p class="meta" id="meta">Loading…</p>
+        <p class="meta day-summary" id="day-summary" hidden></p>
+      </div>
+      <form id="date-form" class="date-form" action="suggest-summary.html" method="get">
+        <button type="button" id="prev-day" aria-label="Previous day">Previous</button>
+        <label for="date">Date</label>
+        <input id="date" name="date" type="date" required>
+        <button type="button" id="next-day" aria-label="Next day">Next</button>
+        <button type="submit">Load</button>
+      </form>
+    </header>
+    <p class="error" id="error" hidden></p>
+    <div class="table-wrap" id="table-wrap">
+      <p class="empty" id="empty" hidden>No stock rows found for this date.</p>
+      <table id="summary-table" class="summary-table" hidden>
+        <tbody id="summary-body"></tbody>
+      </table>
+    </div>
+    <p class="meta"><a href="index.html">← Home</a> · <a id="detail-link" href="suggest.html">Suggestion details</a> · <a href="history.html">Ticker history</a> · <a href="backtest.html">Backtest</a> · <a href="admin.html">Admin</a></p>
+  </main>
+  <script src="js/suggest-summary.js"></script>
+</body>
+</html>

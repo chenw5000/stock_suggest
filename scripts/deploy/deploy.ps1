@@ -18,6 +18,19 @@ if (-not $TomcatHome -or -not (Test-Path $TomcatHome)) {
 $env:CATALINA_HOME = $TomcatHome
 $env:CATALINA_BASE = $TomcatHome
 
+# Windows PowerShell treats redirected native stderr as a terminating error under "Stop";
+# Tomcat scripts log warnings there (e.g. shutdown when already stopped).
+# Do not redirect or pipe output: startup.bat's JVM inherits the handles and the script would block.
+function Invoke-TomcatScript([string]$Name) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & (Join-Path $TomcatHome "bin\$Name")
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 Write-Host "Repo:    $RepoRoot"
 Write-Host "Tomcat:  $TomcatHome"
 Write-Host "Port:    $Port"
@@ -30,18 +43,18 @@ if (-not $SkipBuild) {
 
 $War = Join-Path $RepoRoot "target\stocksugg.war"
 if (-not (Test-Path $War)) {
-    Write-Error "Missing $War — run mvn -DskipTests package first."
+    Write-Error "Missing $War - run mvn -DskipTests package first."
 }
 
 Write-Host "Stopping Tomcat..."
-& "$TomcatHome\bin\shutdown.bat" 2>$null
+Invoke-TomcatScript "shutdown.bat"
 Start-Sleep -Seconds 6
 
-$pids = (netstat -ano | Select-String ":$Port\s" | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique)
+$pids = (netstat -ano | Select-String ":$Port\s.*LISTENING" | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique)
 foreach ($p in $pids) {
     if ($p -match '^\d+$' -and [int]$p -gt 0) {
         Write-Host "Killing process on port $Port (PID $p)"
-        taskkill /PID $p /F 2>$null
+        Stop-Process -Id ([int]$p) -Force -ErrorAction SilentlyContinue
     }
 }
 Start-Sleep -Seconds 2
@@ -55,7 +68,7 @@ Write-Host "Copying WAR..."
 Copy-Item -Force $War (Join-Path $Webapps "stocksugg.war")
 
 Write-Host "Starting Tomcat..."
-& "$TomcatHome\bin\startup.bat"
+Invoke-TomcatScript "startup.bat"
 
 $HealthUrl = "http://localhost:$Port/stocksugg/health"
 Write-Host "Waiting for $HealthUrl ..."

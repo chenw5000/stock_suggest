@@ -8,6 +8,7 @@
   --sell: #c44b4b;
   --hold: #b0892e;
   --avoid: #6b7280;
+  --avoid-high: #8b5cf6;
   --detail: #243040;
   --accent: #7dd3fc;
 }
@@ -35,6 +36,7 @@ h1 {
 .meta { color: var(--muted); margin-bottom: 1.25rem; }
 .meta a { color: var(--accent); }
 .meta code { color: var(--text); }
+.meta + .day-summary { margin-top: -0.9rem; color: var(--text); }
 
 .page-header {
   display: flex;
@@ -255,7 +257,9 @@ tr.detail-row.risks td {
 .BUY { background: color-mix(in srgb, var(--buy) 35%, transparent); color: #9dffc8; }
 .SELL { background: color-mix(in srgb, var(--sell) 35%, transparent); color: #ffb4b4; }
 .HOLD { background: color-mix(in srgb, var(--hold) 35%, transparent); color: #ffe0a3; }
-.AVOID { background: color-mix(in srgb, var(--avoid) 35%, transparent); color: #d1d5db; }
+.AVOID,
+.AVOID_LOW { background: color-mix(in srgb, var(--avoid) 35%, transparent); color: #d1d5db; }
+.AVOID_HIGH { background: color-mix(in srgb, var(--avoid-high) 35%, transparent); color: #ddd6fe; }
 
 td.change {
   font-variant-numeric: tabular-nums;
@@ -325,6 +329,133 @@ td.change.flat { color: var(--muted); }
   opacity: 0.4;
   pointer-events: none;
 }
+
+table.summary-table {
+  table-layout: fixed;
+  min-width: 1240px;
+}
+
+table.summary-table td.summary-cell {
+  width: calc(100% / 6);
+  padding: 0.35rem;
+  border-bottom: none;
+  text-align: left;
+  white-space: normal;
+  vertical-align: top;
+}
+
+.summary-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.summary-card.card-BUY { background: color-mix(in srgb, var(--buy) 35%, var(--panel)); }
+.summary-card.card-SELL { background: color-mix(in srgb, var(--sell) 35%, var(--panel)); }
+.summary-card.card-HOLD { background: color-mix(in srgb, var(--hold) 35%, var(--panel)); }
+.summary-card.card-AVOID,
+.summary-card.card-AVOID_LOW { background: color-mix(in srgb, var(--avoid) 35%, var(--panel)); }
+.summary-card.card-AVOID_HIGH { background: color-mix(in srgb, var(--avoid-high) 35%, var(--panel)); }
+
+.summary-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.summary-row {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-ticker {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.summary-close {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.summary-change {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.summary-change.up { color: #22c55e; }
+.summary-change.down { color: #ef4444; }
+.summary-change.flat { color: var(--muted); }
+
+.summary-suggest {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border-left: 1px solid var(--line);
+}
+
+.summary-suggest .action,
+.summary-no-action {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.85rem;
+}
+
+.summary-suggest .action {
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.summary-suggest .action small {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+.summary-no-action {
+  color: var(--muted);
+}
+
+.summary-trend {
+  position: relative;
+  flex: 1;
+  min-height: 2.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.summary-trend svg {
+  position: absolute;
+  inset: 0.35rem 0.3rem;
+  width: calc(100% - 0.6rem);
+  height: calc(100% - 0.7rem);
+  overflow: visible;
+}
+
+.summary-trend .trend-baseline {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.summary-trend .trend-bar.BUY { fill: #22c55e; }
+.summary-trend .trend-bar.HOLD { fill: #e0b44c; }
+.summary-trend .trend-bar.SELL { fill: #ef4444; }
+.summary-trend .trend-bar.AVOID,
+.summary-trend .trend-bar.AVOID_LOW { fill: #9ca3af; }
+.summary-trend .trend-bar.AVOID_HIGH { fill: #a78bfa; }
 
 a.ticker-link {
   color: var(--accent);

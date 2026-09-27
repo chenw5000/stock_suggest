@@ -23,6 +23,9 @@ public final class SuggestApi {
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
+    /** Trading days of suggestion history returned per ticker by the summary API. */
+    public static final int SUMMARY_HISTORY_DAYS = 30;
+
     private SuggestApi() {}
 
     /** All tuning_params rows for the UI dropdown ({@code id} + {@code name}). */
@@ -74,27 +77,7 @@ public final class SuggestApi {
     public static String suggestionsJson(LocalDate date, long paramId) throws Exception {
         try (Database db = new Database()) {
             StockRepository repository = new StockRepository(db);
-            List<StockDayView> rows = repository.findByDate(date, paramId);
-            Map<String, Float> previousCloses = repository.findPreviousCloses(date);
-
-            List<Map<String, Object>> enriched = new ArrayList<>(rows.size());
-            for (StockDayView row : rows) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> item = MAPPER.convertValue(row, Map.class);
-                Float previousClose = previousCloses.get(row.ticker());
-                Float change = null;
-                Float changePct = null;
-                if (row.close() != null && previousClose != null) {
-                    change = row.close() - previousClose;
-                    if (previousClose != 0f) {
-                        changePct = (change / previousClose) * 100f;
-                    }
-                }
-                item.put("previousClose", previousClose);
-                item.put("change", change);
-                item.put("changePct", changePct);
-                enriched.add(item);
-            }
+            List<Map<String, Object>> enriched = enrichedRows(repository, date, paramId);
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("date", date.toString());
@@ -103,6 +86,56 @@ public final class SuggestApi {
             body.put("rows", enriched);
             return MAPPER.writeValueAsString(body);
         }
+    }
+
+    /**
+     * Same rows as {@link #suggestionsJson(LocalDate, long)}, each with {@code recentActions}:
+     * the last {@link #SUMMARY_HISTORY_DAYS} trading days of {@code suggestedAction}, oldest first.
+     */
+    public static String suggestSummaryJson(LocalDate date, long paramId) throws Exception {
+        try (Database db = new Database()) {
+            StockRepository repository = new StockRepository(db);
+            List<Map<String, Object>> enriched = enrichedRows(repository, date, paramId);
+            Map<String, List<Map<String, Object>>> recentActions =
+                    repository.findRecentActions(date, paramId, SUMMARY_HISTORY_DAYS);
+            for (Map<String, Object> item : enriched) {
+                item.put("recentActions", recentActions.getOrDefault(item.get("ticker"), List.of()));
+            }
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("date", date.toString());
+            body.put("paramId", paramId);
+            body.put("historyDays", SUMMARY_HISTORY_DAYS);
+            body.put("count", enriched.size());
+            body.put("rows", enriched);
+            return MAPPER.writeValueAsString(body);
+        }
+    }
+
+    private static List<Map<String, Object>> enrichedRows(
+            StockRepository repository, LocalDate date, long paramId) throws Exception {
+        List<StockDayView> rows = repository.findByDate(date, paramId);
+        Map<String, Float> previousCloses = repository.findPreviousCloses(date);
+
+        List<Map<String, Object>> enriched = new ArrayList<>(rows.size());
+        for (StockDayView row : rows) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> item = MAPPER.convertValue(row, Map.class);
+            Float previousClose = previousCloses.get(row.ticker());
+            Float change = null;
+            Float changePct = null;
+            if (row.close() != null && previousClose != null) {
+                change = row.close() - previousClose;
+                if (previousClose != 0f) {
+                    changePct = (change / previousClose) * 100f;
+                }
+            }
+            item.put("previousClose", previousClose);
+            item.put("change", change);
+            item.put("changePct", changePct);
+            enriched.add(item);
+        }
+        return enriched;
     }
 
     public static ObjectMapper mapper() {

@@ -113,6 +113,26 @@ public final class WebServer {
                 }
             });
 
+            config.routes.get("/api/suggestSummary/{date}", ctx -> {
+                String rawDate = ctx.pathParam("date");
+                final LocalDate date;
+                try {
+                    date = LocalDate.parse(rawDate);
+                } catch (DateTimeParseException ex) {
+                    ctx.status(HttpStatus.BAD_REQUEST)
+                            .json(Map.of("error", "Invalid date '" + rawDate + "'. Use yyyy-MM-dd."));
+                    return;
+                }
+                long paramId = parsePositiveLong(ctx.queryParam("param"), 1L);
+                try {
+                    ctx.contentType("application/json")
+                            .result(SuggestApi.suggestSummaryJson(date, paramId));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .json(Map.of("error", "Failed to load suggestion summary: " + e.getMessage()));
+                }
+            });
+
             config.routes.get("/api/history/{ticker}", ctx -> {
                 String ticker = ctx.pathParam("ticker");
                 int page = parsePositiveInt(ctx.queryParam("page"), 1);
