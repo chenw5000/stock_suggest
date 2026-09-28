@@ -261,6 +261,17 @@ tr.detail-row.risks td {
 .AVOID_LOW { background: color-mix(in srgb, var(--avoid) 35%, transparent); color: #d1d5db; }
 .AVOID_HIGH { background: color-mix(in srgb, var(--avoid-high) 35%, transparent); color: #ddd6fe; }
 
+.action-change {
+  display: inline-block;
+  margin-left: 0.4rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.action-change.up { color: #22c55e; }
+.action-change.down { color: #ef4444; }
+.action-change.same { color: var(--muted); }
+
 td.change {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

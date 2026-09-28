@@ -1,5 +1,6 @@
 (function () {
   const MAIN_COL_COUNT = 11;
+  const ACTION_SCORE = { AVOID_HIGH: 2, BUY: 1, HOLD: 0, SELL: -1, AVOID_LOW: -2, AVOID: -2 };
 
   const params = new URLSearchParams(window.location.search);
   const dateInput = document.getElementById("date");
@@ -85,7 +86,7 @@
 
   function apiUrl(d) {
     // Resolve against the app context (works under /stocksugg/ on Tomcat).
-    const url = new URL("api/suggest/" + encodeURIComponent(d), window.location.href);
+    const url = new URL("api/suggestSummary/" + encodeURIComponent(d), window.location.href);
     url.searchParams.set("param", DEFAULT_PARAM_ID);
     return url.toString();
   }
@@ -134,6 +135,40 @@
     return '<span class="action ' + safe + '">' + safe + "</span>";
   }
 
+  /** AVOID split by the API's avoidSide into AVOID_HIGH / AVOID_LOW; other actions unchanged. */
+  function actionKey(entry) {
+    const action = entry && entry.suggestedAction ? String(entry.suggestedAction).toUpperCase() : "";
+    if (action === "AVOID" && (entry.avoidSide === "HIGH" || entry.avoidSide === "LOW")) {
+      return "AVOID_" + entry.avoidSide;
+    }
+    return action;
+  }
+
+  /**
+   * ▲ / ▼ / – comparing the action on isoDate with the previous trading day, ranked
+   * AVOID_HIGH > BUY > HOLD > SELL > AVOID_LOW. Empty when either day is missing or unranked.
+   */
+  function actionChange(recentActions, isoDate) {
+    const entries = recentActions || [];
+    const i = entries.findIndex((entry) => entry.date === isoDate);
+    if (i <= 0) {
+      return "";
+    }
+    const prevKey = actionKey(entries[i - 1]);
+    const today = ACTION_SCORE[actionKey(entries[i])];
+    const prev = ACTION_SCORE[prevKey];
+    if (today === undefined || prev === undefined) {
+      return "";
+    }
+    const direction = today > prev ? "up" : today < prev ? "down" : "same";
+    const sign = direction === "up" ? "▲" : direction === "down" ? "▼" : "–";
+    const title = "Previous (" + entries[i - 1].date + "): " + prevKey;
+    return (
+      '<span class="action-change ' + direction + '" title="' + escapeHtml(title) + '">' +
+      sign + "</span>"
+    );
+  }
+
   function detailRow(label, value, cssClass) {
     const items = normalizeList(value);
     const body = items.length
@@ -174,7 +209,7 @@
     return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   }
 
-  function renderRows(rows) {
+  function renderRows(rows, isoDate) {
     tbody.innerHTML = "";
     if (!rows || rows.length === 0) {
       table.hidden = true;
@@ -185,7 +220,8 @@
     table.hidden = false;
 
     const html = rows.map((row) => {
-      const action = row.suggestedAction ? String(row.suggestedAction).toUpperCase() : "";
+      const today = (row.recentActions || []).find((entry) => entry.date === isoDate);
+      const action = actionKey(today || row);
       return (
         '<tr class="main-row">' +
         '<td class="date-cell">' +
@@ -203,7 +239,7 @@
         "<td>" + formatNum(row.ma50) + "</td>" +
         "<td>" + formatNum(row.chandeMmt) + "</td>" +
         "<td>" + formatNum(row.chalkinMF) + "</td>" +
-        "<td>" + actionBadge(action) + "</td>" +
+        "<td>" + actionBadge(action) + actionChange(row.recentActions, isoDate) + "</td>" +
         "<td>" + formatNum(row.confidence) + "</td>" +
         "<td>" + formatNum(row.suggestedStopPrice) + "</td>" +
         "<td>" + formatNum(row.suggestedEntryPrice) + "</td>" +
@@ -270,7 +306,7 @@
     .then((data) => {
       errorEl.hidden = true;
       meta.textContent = "Date: " + data.date + " · " + data.count + " ticker(s)";
-      renderRows(data.rows || []);
+      renderRows(data.rows || [], data.date);
     })
     .catch((err) => {
       showError("Failed to load suggestions: " + err.message);
