@@ -426,8 +426,19 @@ table.summary-table td.summary-cell {
 }
 
 .summary-suggest .action {
+  position: relative;
   flex-direction: column;
   line-height: 1.15;
+}
+
+.summary-suggest .action-change {
+  position: absolute;
+  top: 50%;
+  right: 0.3rem;
+  transform: translateY(-50%);
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1;
 }
 
 .summary-suggest .action small {

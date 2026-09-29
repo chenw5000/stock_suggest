@@ -141,7 +141,7 @@
     );
   }
 
-  function actionBadge(action) {
+  function actionBadge(action, change = "") {
     if (!action) {
       return '<span class="summary-no-action">—</span>';
     }
@@ -149,11 +149,36 @@
     if (key === "AVOID_HIGH" || key === "AVOID_LOW") {
       return (
         '<span class="action ' + key + '" title="' + ACTION_LABEL[key] + '">' +
-        "AVOID<small>" + key.slice("AVOID_".length) + "</small></span>"
+        "AVOID<small>" + key.slice("AVOID_".length) + "</small>" + change + "</span>"
       );
     }
     const safe = escapeHtml(key);
-    return '<span class="action ' + safe + '">' + safe + "</span>";
+    return '<span class="action ' + safe + '">' + safe + change + "</span>";
+  }
+
+  /**
+   * ▲ / ▼ / – comparing the action on isoDate with the previous trading day, ranked
+   * AVOID_HIGH > BUY > HOLD > SELL > AVOID_LOW. Empty when either day is missing or unranked.
+   */
+  function actionChange(recentActions, isoDate) {
+    const entries = recentActions || [];
+    const i = entries.findIndex((entry) => entry.date === isoDate);
+    if (i <= 0) {
+      return "";
+    }
+    const prevKey = trendKey(entries[i - 1]);
+    const today = ACTION_SCORE[trendKey(entries[i])];
+    const prev = ACTION_SCORE[prevKey];
+    if (today === undefined || prev === undefined) {
+      return "";
+    }
+    const direction = today > prev ? "up" : today < prev ? "down" : "same";
+    const sign = direction === "up" ? "▲" : direction === "down" ? "▼" : "–";
+    const title = "Previous (" + entries[i - 1].date + "): " + prevKey;
+    return (
+      '<span class="action-change ' + direction + '" title="' + escapeHtml(title) + '">' +
+      sign + "</span>"
+    );
   }
 
   /** The row's action on isoDate, with AVOID split into AVOID_HIGH / AVOID_LOW when known. */
@@ -226,7 +251,7 @@
       formatChange(row.change, row.changePct) +
       "</div>" +
       '<div class="summary-suggest">' +
-      actionBadge(row.actionKey) +
+      actionBadge(row.actionKey, row.actionChange) +
       trendChart(row.recentActions) +
       "</div>" +
       "</div>" +
@@ -314,6 +339,7 @@
       const rows = data.rows || [];
       rows.forEach((row) => {
         row.actionKey = dayActionKey(row, data.date);
+        row.actionChange = actionChange(row.recentActions, data.date);
       });
       daySummaryEl.textContent = daySummary(rows);
       daySummaryEl.hidden = rows.length === 0;
