@@ -6,6 +6,9 @@ This is a research / educational tool, not investment advice.
 
 ![Gemini suggestions for 2026-07-22](docs/images/suggest-2026-07-22.png)
 
+![Suggestion History for TSLA](docs/images/history-2026-09-29.png)
+
+![Suggestion Summary](docs/images/suggest-summary.png)
 ---
 
 ## Prerequisites
