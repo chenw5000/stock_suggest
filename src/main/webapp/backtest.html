@@ -51,6 +51,9 @@
             <label for="sell-conf">Sell confidence ≥</label>
             <input id="sell-conf" name="sellConf" type="number" min="0" max="1" step="0.05" value="0.00" required>
           </div>
+        </div>
+
+        <div class="backtest-row">
           <div class="backtest-field">
             <label for="on-buy">On BUY signal</label>
             <select id="on-buy" name="onBuy" required>
@@ -67,8 +70,16 @@
             </select>
           </div>
           <div class="backtest-field">
-            <label for="on-avoid">On AVOID signal</label>
-            <select id="on-avoid" name="onAvoid" required>
+            <label for="on-avoid-high" title="AVOID with RSI ≥ 60 or close &gt; 5% above MA20 (overextended)">On AVOID_HIGH signal</label>
+            <select id="on-avoid-high" name="onAvoidHigh" required>
+              <option value="SELL_PART" selected>SELL_PART (one bucket)</option>
+              <option value="SELL_ALL">SELL_ALL (exit all shares)</option>
+              <option value="NONE">NO Action</option>
+            </select>
+          </div>
+          <div class="backtest-field">
+            <label for="on-avoid-low" title="Any other AVOID (weak / broken)">On AVOID_LOW signal</label>
+            <select id="on-avoid-low" name="onAvoidLow" required>
               <option value="SELL_PART" selected>SELL_PART (one bucket)</option>
               <option value="SELL_ALL">SELL_ALL (exit all shares)</option>
               <option value="NONE">NO Action</option>
@@ -78,23 +89,18 @@
 
         <div class="backtest-row backtest-row-actions">
           <div class="backtest-actions">
+            <label class="backtest-check" for="recompute" title="Ignore the saved best strategy and run the search again">
+              <input id="recompute" type="checkbox"> Recompute
+            </label>
+            <button type="button" id="find-best-btn">Find Best Strategy</button>
             <button type="submit" id="run-btn">Run backtest</button>
           </div>
         </div>
       </form>
     </section>
 
-    <section id="best-strategy" class="backtest-panel">
-      <h2 class="section-title">Saved best strategy</h2>
-      <p class="meta" id="best-strategy-line">Select a ticker and dates to look up a saved optimize result.</p>
-      <div class="backtest-actions" id="best-strategy-actions">
-        <button type="button" id="find-best-btn">Find Best Strategy</button>
-        <button type="button" id="apply-best-btn" hidden>Apply</button>
-      </div>
-    </section>
     <section id="results" class="backtest-results" hidden>
       <h2 class="section-title">Summary</h2>
-      <p class="meta" id="strategy-line"></p>
       <div class="backtest-summary" id="summary"></div>
 
       <h2 class="section-title">Trades</h2>

@@ -25,14 +25,14 @@ public final class StrategyOptimizeRepository {
             INSERT INTO strategy_optimize (
                 ticker, param_id, from_date, to_date, starting_cash,
                 parts, min_buy_confidence, min_sell_confidence,
-                on_buy, on_sell, on_hold, on_avoid,
+                on_buy, on_sell, on_hold, on_avoid, on_avoid_high, on_avoid_low,
                 ending_equity, ending_cash, ending_shares, last_close, return_pct,
                 buy_count, sell_count, skipped_buys,
                 buy_hold_equity, buy_hold_return_pct, rank
             ) VALUES (
                 ?, ?, ?, ?, ?,
                 ?, ?, ?,
-                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?
@@ -49,6 +49,8 @@ public final class StrategyOptimizeRepository {
                 on_sell = ?,
                 on_hold = ?,
                 on_avoid = ?,
+                on_avoid_high = ?,
+                on_avoid_low = ?,
                 ending_equity = ?,
                 ending_cash = ?,
                 ending_shares = ?,
@@ -66,7 +68,9 @@ public final class StrategyOptimizeRepository {
     private static final String SELECT_COLUMNS = """
             id, ticker, param_id, from_date, to_date, starting_cash,
             parts, min_buy_confidence, min_sell_confidence,
-            on_buy, on_sell, on_hold, on_avoid,
+            on_buy, on_sell, on_hold,
+            COALESCE(on_avoid_high, on_avoid) AS on_avoid_high,
+            COALESCE(on_avoid_low, on_avoid) AS on_avoid_low,
             ending_equity, ending_cash, ending_shares, last_close, return_pct,
             buy_count, sell_count, skipped_buys,
             buy_hold_equity, buy_hold_return_pct, rank, computed_at
@@ -108,6 +112,14 @@ public final class StrategyOptimizeRepository {
                     + "AND from_date >= ? AND from_date <= ? "
                     + "AND to_date >= ? AND to_date <= ? "
                     + "ORDER BY to_date DESC, computed_at DESC";
+
+    /** Rows saved before the AVOID HIGH/LOW split have null {@code on_avoid_high} and are excluded. */
+    private static final String SELECT_EXACT_BEST =
+            "SELECT " + SELECT_COLUMNS
+                    + "FROM strategy_optimize "
+                    + "WHERE ticker = ? AND param_id = ? AND from_date = ? AND to_date = ? AND rank = 1 "
+                    + "AND ABS(starting_cash - ?) < 0.005 "
+                    + "AND on_avoid_high IS NOT NULL";
 
     private final Connection connection;
 
@@ -156,6 +168,31 @@ public final class StrategyOptimizeRepository {
             int rank) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(SELECT_BY_KEY)) {
             bindKey(ps, ticker, paramId, fromDate, toDate, rank);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(mapRow(rs));
+            }
+        }
+    }
+
+    /**
+     * Best ({@code rank = 1}) row searched for exactly this ticker, param, window and starting
+     * cash with the current (AVOID HIGH/LOW) strategy grid.
+     */
+    public Optional<StrategyOptimize> findExactBest(
+            String ticker,
+            long paramId,
+            LocalDate fromDate,
+            LocalDate toDate,
+            double startingCash) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(SELECT_EXACT_BEST)) {
+            ps.setString(1, normalizeTicker(ticker));
+            ps.setLong(2, paramId);
+            ps.setDate(3, java.sql.Date.valueOf(fromDate));
+            ps.setDate(4, java.sql.Date.valueOf(toDate));
+            ps.setDouble(5, startingCash);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();
@@ -284,7 +321,7 @@ public final class StrategyOptimizeRepository {
             ps.setString(i++, row.onBuy());
             ps.setString(i++, row.onSell());
             ps.setString(i++, row.onHold());
-            ps.setString(i++, row.onAvoid());
+            i = bindAvoidIntents(ps, i, row);
             ps.setDouble(i++, row.endingEquity());
             setDouble(ps, i++, row.endingCash());
             setInteger(ps, i++, row.endingShares());
@@ -310,7 +347,7 @@ public final class StrategyOptimizeRepository {
             ps.setString(i++, row.onBuy());
             ps.setString(i++, row.onSell());
             ps.setString(i++, row.onHold());
-            ps.setString(i++, row.onAvoid());
+            i = bindAvoidIntents(ps, i, row);
             ps.setDouble(i++, row.endingEquity());
             setDouble(ps, i++, row.endingCash());
             setInteger(ps, i++, row.endingShares());
@@ -328,6 +365,15 @@ public final class StrategyOptimizeRepository {
             ps.setInt(i, row.rank());
             return ps.executeUpdate();
         }
+    }
+
+    /** Binds {@code on_avoid} (legacy NOT NULL, gets the LOW intent), {@code on_avoid_high}, {@code on_avoid_low}. */
+    private static int bindAvoidIntents(PreparedStatement ps, int index, StrategyOptimize row)
+            throws SQLException {
+        ps.setString(index++, row.onAvoidLow());
+        ps.setString(index++, row.onAvoidHigh());
+        ps.setString(index++, row.onAvoidLow());
+        return index;
     }
 
     private static void bindKey(
@@ -358,7 +404,8 @@ public final class StrategyOptimizeRepository {
                 rs.getString("on_buy"),
                 rs.getString("on_sell"),
                 rs.getString("on_hold"),
-                rs.getString("on_avoid"),
+                rs.getString("on_avoid_high"),
+                rs.getString("on_avoid_low"),
                 rs.getDouble("ending_equity"),
                 getDouble(rs, "ending_cash"),
                 getInteger(rs, "ending_shares"),

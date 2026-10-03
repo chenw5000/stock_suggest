@@ -282,6 +282,16 @@ public final class Database implements AutoCloseable {
                 CREATE UNIQUE INDEX IF NOT EXISTS strategy_optimize_uq
                 ON strategy_optimize (ticker, param_id, from_date, to_date, rank)
                 """);
+        addAvoidSplitColumns(stmt);
+    }
+
+    /**
+     * AVOID split into HIGH / LOW intents. Rows saved before the split have these null and
+     * fall back to {@code on_avoid}, which keeps receiving the LOW intent on new writes.
+     */
+    private static void addAvoidSplitColumns(Statement stmt) throws SQLException {
+        stmt.execute("ALTER TABLE strategy_optimize ADD COLUMN IF NOT EXISTS on_avoid_high VARCHAR(16)");
+        stmt.execute("ALTER TABLE strategy_optimize ADD COLUMN IF NOT EXISTS on_avoid_low VARCHAR(16)");
     }
 
     private static void initStrategyOptimizeH2(Statement stmt) throws SQLException {
@@ -318,6 +328,7 @@ public final class Database implements AutoCloseable {
                 CREATE UNIQUE INDEX IF NOT EXISTS strategy_optimize_uq
                 ON strategy_optimize (ticker, param_id, from_date, to_date, rank)
                 """);
+        addAvoidSplitColumns(stmt);
     }
 
     /** One baseline row so experiments always have a default param_id. */

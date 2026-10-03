@@ -2,9 +2,9 @@ package com.stocksugg.stock;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -50,30 +50,37 @@ public final class SuggestionStrategyOptimizer {
                 BacktestStrategy.TradeIntent.SELL_ALL
         };
 
-        List<Candidate> all = new ArrayList<>();
+        // Many parameter combos are behaviorally identical (e.g. BUY_ALL ignores parts;
+        // SELL_PART == SELL_ALL when only one lot is held; AVOID_HIGH intent is irrelevant
+        // when the window has no AVOID_HIGH days). Keep one candidate per distinct trade
+        // outcome — the one with the fewest trade events — so the top list shows genuinely
+        // different strategies and memory stays bounded as the grid grows.
+        Map<String, Candidate> byOutcome = new LinkedHashMap<>();
         for (int parts : partsOptions) {
             for (double buyConf : buyConfOptions) {
                 for (double sellConf : sellConfOptions) {
                     for (BacktestStrategy.TradeIntent onBuy : buyIntents) {
                         for (BacktestStrategy.TradeIntent onSell : sellIntents) {
-                            for (BacktestStrategy.TradeIntent onAvoid : avoidIntents) {
-                                // Skip useless combos: never buy
-                                if (onBuy == BacktestStrategy.TradeIntent.NONE) {
-                                    continue;
+                            for (BacktestStrategy.TradeIntent onAvoidHigh : avoidIntents) {
+                                for (BacktestStrategy.TradeIntent onAvoidLow : avoidIntents) {
+                                    // parts=1 + BUY_PART is same sizing as BUY_ALL when flat-only
+                                    // still useful with multi-buy allowed via BUY_PART on parts=1
+                                    BacktestStrategy strategy = new BacktestStrategy(
+                                            parts,
+                                            buyConf,
+                                            sellConf,
+                                            onBuy,
+                                            onSell,
+                                            BacktestStrategy.TradeIntent.NONE,
+                                            onAvoidHigh,
+                                            onAvoidLow);
+                                    SuggestionBacktester.Result result =
+                                            SuggestionBacktester.run(startingCash, strategy, days);
+                                    Candidate candidate = new Candidate(strategy, result);
+                                    byOutcome.merge(outcomeSignature(result), candidate,
+                                            (kept, next) -> next.result().trades().size()
+                                                    < kept.result().trades().size() ? next : kept);
                                 }
-                                // parts=1 + BUY_PART is same sizing as BUY_ALL when flat-only
-                                // still useful with multi-buy allowed via BUY_PART on parts=1
-                                BacktestStrategy strategy = new BacktestStrategy(
-                                        parts,
-                                        buyConf,
-                                        sellConf,
-                                        onBuy,
-                                        onSell,
-                                        BacktestStrategy.TradeIntent.NONE,
-                                        onAvoid);
-                                SuggestionBacktester.Result result =
-                                        SuggestionBacktester.run(startingCash, strategy, days);
-                                all.add(new Candidate(strategy, result));
                             }
                         }
                     }
@@ -81,30 +88,17 @@ public final class SuggestionStrategyOptimizer {
             }
         }
 
-        all.sort(Comparator
+        List<Candidate> distinct = new ArrayList<>(byOutcome.values());
+        distinct.sort(Comparator
                 .comparingDouble((Candidate c) -> c.result().endingEquity())
                 .reversed()
                 .thenComparingInt(c -> c.result().trades().size()));
-
-        // Many parameter combos are behaviorally identical (e.g. BUY_ALL ignores parts;
-        // SELL_PART == SELL_ALL when only one lot is held). Keep one candidate per
-        // distinct trade outcome so the top list shows genuinely different strategies.
-        Set<String> seenOutcomes = new HashSet<>();
-        List<Candidate> distinct = new ArrayList<>();
-        for (Candidate candidate : all) {
-            if (seenOutcomes.add(outcomeSignature(candidate.result()))) {
-                distinct.add(candidate);
-                if (distinct.size() == topN) {
-                    break;
-                }
-            }
-        }
 
         return new Report(
                 SuggestionBacktester.buyAndHold(startingCash, days),
                 SuggestionBacktester.run(startingCash, days),
                 SuggestionBacktester.runParts(startingCash, 4, days),
-                List.copyOf(distinct));
+                List.copyOf(distinct.subList(0, Math.min(topN, distinct.size()))));
     }
 
     /**

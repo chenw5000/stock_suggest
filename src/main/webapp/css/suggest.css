@@ -721,6 +721,12 @@ td.admin-value-cell {
   justify-self: end;
 }
 
+.backtest-actions .backtest-check {
+  display: inline-flex;
+  margin-right: 0.75rem;
+  vertical-align: middle;
+}
+
 .backtest-actions button,
 .backtest-actions a {
   background: #1e3a4f;

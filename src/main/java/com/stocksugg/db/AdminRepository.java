@@ -87,8 +87,8 @@ public final class AdminRepository {
         }
         String normalizedKey = key.trim();
         String normalizedValue = value == null ? "" : value;
-        if (normalizedValue.length() > 155) {
-            throw new IllegalArgumentException("value must be at most 155 characters");
+        if (normalizedValue.length() > 500) {
+            throw new IllegalArgumentException("value must be at most 500 characters");
         }
 
         Optional<Map<String, Object>> existing = findByKey(normalizedKey);

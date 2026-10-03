@@ -77,11 +77,11 @@ public final class SuggestionBacktester {
                 continue;
             }
             lastClose = day.close();
-            BacktestStrategy.TradeIntent intent = strategy.intentFor(day.suggestedAction());
+            BacktestStrategy.TradeIntent intent = strategy.intentFor(day);
             if (intent == BacktestStrategy.TradeIntent.NONE) {
                 continue;
             }
-            if (!strategy.passesConfidence(day.suggestedAction(), day.confidence())) {
+            if (!strategy.passesConfidence(intent, day.confidence())) {
                 trades.add(trade(day, "SKIP_LOW_CONFIDENCE", 0, cash, totalShares(lots)));
                 continue;
             }

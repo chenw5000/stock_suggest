@@ -75,6 +75,55 @@ class StrategyOptimizeRepositoryTest {
     }
 
     @Test
+    void avoidHighAndLowRoundTripWithLegacyFallback() throws Exception {
+        try (Database db = new Database("jdbc:h2:mem:strategy_optimize_avoid;DB_CLOSE_DELAY=-1")) {
+            StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+            LocalDate from = LocalDate.parse("2026-03-01");
+            LocalDate to = LocalDate.parse("2026-06-01");
+
+            BacktestStrategy split = new BacktestStrategy(
+                    2, 0.5, 0.5,
+                    BacktestStrategy.TradeIntent.BUY_PART,
+                    BacktestStrategy.TradeIntent.SELL_PART,
+                    BacktestStrategy.TradeIntent.NONE,
+                    BacktestStrategy.TradeIntent.NONE,
+                    BacktestStrategy.TradeIntent.SELL_ALL);
+            SuggestionBacktester.Result result = new SuggestionBacktester.Result(
+                    10_000.0, 10_000.0, 0, 100.0, 10_500.0, 5.0,
+                    1, 1, 0, List.of());
+            repo.upsert(StrategyOptimize.fromSearch(
+                    "MSFT", 1L, from, to, 10_000.0, split, result, null, 1));
+
+            StrategyOptimize loaded = repo.findByKey("MSFT", 1L, from, to, 1).orElseThrow();
+            assertEquals("NONE", loaded.onAvoidHigh());
+            assertEquals("SELL_ALL", loaded.onAvoidLow());
+            assertEquals(split, loaded.toStrategy());
+
+            try (var stmt = db.connection().createStatement()) {
+                stmt.execute("""
+                        INSERT INTO strategy_optimize (
+                            ticker, param_id, from_date, to_date, parts,
+                            min_buy_confidence, min_sell_confidence,
+                            on_buy, on_sell, on_avoid, ending_equity, return_pct, rank
+                        ) VALUES (
+                            'NVDA', 1, DATE '2026-03-01', DATE '2026-06-01', 4,
+                            0, 0, 'BUY_PART', 'SELL_PART', 'SELL_PART', 10000, 0, 1
+                        )
+                        """);
+            }
+            StrategyOptimize legacy = repo.findByKey("NVDA", 1L, from, to, 1).orElseThrow();
+            assertEquals("SELL_PART", legacy.onAvoidHigh());
+            assertEquals("SELL_PART", legacy.onAvoidLow());
+
+            assertTrue(repo.findExactBest("msft", 1L, from, to, 10_000.0).isPresent());
+            assertTrue(repo.findExactBest("MSFT", 1L, from, to, 20_000.0).isEmpty());
+            assertTrue(repo.findExactBest("MSFT", 1L, from.plusDays(1), to, 10_000.0).isEmpty());
+            assertTrue(repo.findExactBest("MSFT", 2L, from, to, 10_000.0).isEmpty());
+            assertTrue(repo.findExactBest("NVDA", 1L, from, to, 10_000.0).isEmpty());
+        }
+    }
+
+    @Test
     void deleteByWindowRemovesPriorResultBeforeReplace() throws Exception {
         try (Database db = new Database("jdbc:h2:mem:strategy_optimize_delete;DB_CLOSE_DELAY=-1")) {
             StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);

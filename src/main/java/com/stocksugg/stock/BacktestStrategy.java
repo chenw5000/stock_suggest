@@ -9,7 +9,8 @@ package com.stocksugg.stock;
  * @param onBuy               what to do when suggestedAction is BUY
  * @param onSell              what to do when suggestedAction is SELL
  * @param onHold              what to do when suggestedAction is HOLD (usually {@link TradeIntent#NONE})
- * @param onAvoid             what to do when suggestedAction is AVOID
+ * @param onAvoidHigh         what to do on AVOID classified HIGH (overextended / take profit)
+ * @param onAvoidLow          what to do on AVOID classified LOW (weak), or AVOID that cannot be classified
  */
 public record BacktestStrategy(
         int parts,
@@ -18,7 +19,8 @@ public record BacktestStrategy(
         TradeIntent onBuy,
         TradeIntent onSell,
         TradeIntent onHold,
-        TradeIntent onAvoid
+        TradeIntent onAvoidHigh,
+        TradeIntent onAvoidLow
 ) {
     public enum TradeIntent {
         NONE,
@@ -26,6 +28,18 @@ public record BacktestStrategy(
         BUY_ALL,
         SELL_PART,
         SELL_ALL
+    }
+
+    /** Same intent for both AVOID sides (pre-split behavior). */
+    public BacktestStrategy(
+            int parts,
+            double minBuyConfidence,
+            double minSellConfidence,
+            TradeIntent onBuy,
+            TradeIntent onSell,
+            TradeIntent onHold,
+            TradeIntent onAvoid) {
+        this(parts, minBuyConfidence, minSellConfidence, onBuy, onSell, onHold, onAvoid, onAvoid);
     }
 
     public static BacktestStrategy allIn() {
@@ -46,20 +60,20 @@ public record BacktestStrategy(
                 TradeIntent.SELL_PART);
     }
 
-    public TradeIntent intentFor(String suggestedAction) {
+    public TradeIntent intentFor(BacktestDay day) {
+        return intentFor(day.suggestedAction(), day.avoidSide());
+    }
+
+    public TradeIntent intentFor(String suggestedAction, String avoidSide) {
         return switch (normalize(suggestedAction)) {
             case "BUY" -> onBuy;
             case "SELL" -> onSell;
-            case "AVOID" -> onAvoid;
+            case "AVOID" -> AvoidClassifier.HIGH.equals(avoidSide) ? onAvoidHigh : onAvoidLow;
             default -> onHold;
         };
     }
 
-    public boolean passesConfidence(String suggestedAction, Float confidence) {
-        TradeIntent intent = intentFor(suggestedAction);
-        if (intent == TradeIntent.NONE) {
-            return true;
-        }
+    public boolean passesConfidence(TradeIntent intent, Float confidence) {
         double conf = confidence == null ? 0.0 : confidence;
         return switch (intent) {
             case BUY_PART, BUY_ALL -> conf + 1e-9 >= minBuyConfidence;
@@ -83,7 +97,8 @@ public record BacktestStrategy(
                 + " BUY->" + onBuy
                 + " SELL->" + onSell
                 + " HOLD->" + onHold
-                + " AVOID->" + onAvoid;
+                + " AVOID_HIGH->" + onAvoidHigh
+                + " AVOID_LOW->" + onAvoidLow;
     }
 
     private static String format(double v) {

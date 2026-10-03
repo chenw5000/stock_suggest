@@ -246,8 +246,11 @@
     if (best.onSell) {
       url.searchParams.set("onSell", best.onSell);
     }
-    if (best.onAvoid) {
-      url.searchParams.set("onAvoid", best.onAvoid);
+    if (best.onAvoidHigh) {
+      url.searchParams.set("onAvoidHigh", best.onAvoidHigh);
+    }
+    if (best.onAvoidLow) {
+      url.searchParams.set("onAvoidLow", best.onAvoidLow);
     }
     return url.pathname + url.search;
   }
@@ -276,7 +279,8 @@
       " sellConf≥" + formatNum(b.minSellConfidence) +
       " BUY→" + b.onBuy +
       " SELL→" + b.onSell +
-      " AVOID→" + b.onAvoid +
+      " AVOID_HIGH→" + b.onAvoidHigh +
+      " AVOID_LOW→" + b.onAvoidLow +
       " · equity=" + formatMoney(b.endingEquity) +
       " (" + formatPct(b.returnPct) + ")" +
       " · buy&hold " + bh;

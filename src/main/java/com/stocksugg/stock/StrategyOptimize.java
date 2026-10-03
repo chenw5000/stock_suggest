@@ -19,7 +19,8 @@ public record StrategyOptimize(
         String onBuy,
         String onSell,
         String onHold,
-        String onAvoid,
+        String onAvoidHigh,
+        String onAvoidLow,
         double endingEquity,
         Double endingCash,
         Integer endingShares,
@@ -76,7 +77,8 @@ public record StrategyOptimize(
                 strategy.onBuy().name(),
                 strategy.onSell().name(),
                 strategy.onHold().name(),
-                strategy.onAvoid().name(),
+                strategy.onAvoidHigh().name(),
+                strategy.onAvoidLow().name(),
                 result.endingEquity(),
                 result.endingCash(),
                 result.endingShares(),
@@ -100,6 +102,7 @@ public record StrategyOptimize(
                 BacktestStrategy.TradeIntent.valueOf(onBuy),
                 BacktestStrategy.TradeIntent.valueOf(onSell),
                 BacktestStrategy.TradeIntent.valueOf(onHold),
-                BacktestStrategy.TradeIntent.valueOf(onAvoid));
+                BacktestStrategy.TradeIntent.valueOf(onAvoidHigh),
+                BacktestStrategy.TradeIntent.valueOf(onAvoidLow));
     }
 }

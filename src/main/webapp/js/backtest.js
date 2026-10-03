@@ -9,23 +9,21 @@
   const sellConfInput = document.getElementById("sell-conf");
   const onBuySelect = document.getElementById("on-buy");
   const onSellSelect = document.getElementById("on-sell");
-  const onAvoidSelect = document.getElementById("on-avoid");
+  const onAvoidHighSelect = document.getElementById("on-avoid-high");
+  const onAvoidLowSelect = document.getElementById("on-avoid-low");
   const runBtn = document.getElementById("run-btn");
   const errorEl = document.getElementById("error");
   const meta = document.getElementById("meta");
   const results = document.getElementById("results");
-  const strategyLine = document.getElementById("strategy-line");
   const summary = document.getElementById("summary");
   const tradesEmpty = document.getElementById("trades-empty");
   const tradesTable = document.getElementById("trades-table");
   const tradesBody = document.getElementById("trades-body");
-  const bestStrategyLine = document.getElementById("best-strategy-line");
   const findBestBtn = document.getElementById("find-best-btn");
-  const applyBestBtn = document.getElementById("apply-best-btn");
+  const recomputeCheckbox = document.getElementById("recompute");
 
   const params = new URLSearchParams(window.location.search);
   const DEFAULT_PARAM_ID = "1";
-  let lastBestStrategy = null;
 
   function apiUrl(path) {
     return new URL(path, window.location.href).toString();
@@ -109,20 +107,9 @@
       const onSell = params.get("onSell").toUpperCase();
       onSellSelect.value = onSell === "NO_ACTION" ? "NONE" : onSell;
     }
-    if (params.get("onAvoid") && onAvoidSelect) {
-      const onAvoid = params.get("onAvoid").toUpperCase();
-      onAvoidSelect.value = onAvoid === "NO_ACTION" ? "NONE" : onAvoid;
-    }
-  }
-
-  function setBestStrategyButtons(mode) {
-    // mode: "none" | "find" | "both" — Find Best Strategy stays visible so users can re-run.
-    if (findBestBtn) {
-      findBestBtn.hidden = false;
-    }
-    if (applyBestBtn) {
-      applyBestBtn.hidden = mode !== "both";
-    }
+    const legacyAvoid = params.get("onAvoid");
+    setSelectValue(onAvoidHighSelect, params.get("onAvoidHigh") || legacyAvoid);
+    setSelectValue(onAvoidLowSelect, params.get("onAvoidLow") || legacyAvoid);
   }
 
   function setSelectValue(select, value) {
@@ -169,91 +156,8 @@
     }
     setSelectValue(onBuySelect, best.onBuy);
     setSelectValue(onSellSelect, best.onSell);
-    setSelectValue(onAvoidSelect, best.onAvoid);
-
-    meta.textContent =
-      "Applied saved best strategy for " + (best.ticker || "") +
-      " (" + (best.fromDate || "") + " → " + (best.toDate || "") + "). Click Run backtest to simulate.";
-  }
-
-  function renderBestStrategy(data) {
-    if (!bestStrategyLine) {
-      return;
-    }
-    const ticker = tickerSelect.value;
-    const from = fromInput.value;
-    const to = toInput.value;
-    if (!data || !data.found || !data.best) {
-      lastBestStrategy = null;
-      bestStrategyLine.textContent =
-        "No saved best strategy for " + ticker +
-        " with from/to within ±7 days of " + from + " → " + to + ".";
-      setBestStrategyButtons("find");
-      return;
-    }
-    const b = data.best;
-    lastBestStrategy = b;
-    const bh = b.buyHoldReturnPct == null
-      ? "—"
-      : formatPct(b.buyHoldReturnPct);
-    bestStrategyLine.textContent =
-      b.ticker + " · saved " + b.fromDate + " → " + b.toDate +
-      " · parts=" + b.parts +
-      " buyConf≥" + formatNum(b.minBuyConfidence, 2) +
-      " sellConf≥" + formatNum(b.minSellConfidence, 2) +
-      " BUY→" + b.onBuy +
-      " SELL→" + b.onSell +
-      " AVOID→" + b.onAvoid +
-      " · equity=" + formatMoney(b.endingEquity) +
-      " (" + formatPct(b.returnPct) + ")" +
-      " · buy&hold " + bh;
-    setBestStrategyButtons("both");
-  }
-
-  function loadBestStrategy() {
-    if (!bestStrategyLine) {
-      return Promise.resolve();
-    }
-    const ticker = tickerSelect.value;
-    const from = fromInput.value;
-    const to = toInput.value;
-    if (!ticker || !from || !to) {
-      lastBestStrategy = null;
-      bestStrategyLine.textContent =
-        "Select a ticker and dates to look up a saved optimize result.";
-      setBestStrategyButtons("none");
-      return Promise.resolve();
-    }
-
-    bestStrategyLine.textContent = "Looking up saved best strategy…";
-    setBestStrategyButtons("none");
-    const url = new URL("api/backtest/best-strategy", window.location.href);
-    url.searchParams.set("ticker", ticker);
-    url.searchParams.set("from", from);
-    url.searchParams.set("to", to);
-    url.searchParams.set("param", DEFAULT_PARAM_ID);
-
-    return fetch(url.toString(), { headers: { Accept: "application/json" } })
-      .then((response) => response.text().then((text) => {
-        let data = null;
-        try {
-          data = text ? JSON.parse(text) : null;
-        } catch (_) {
-          /* ignore */
-        }
-        if (!response.ok) {
-          throw new Error((data && data.error) || text || ("HTTP " + response.status));
-        }
-        return data;
-      }))
-      .then((data) => {
-        renderBestStrategy(data);
-      })
-      .catch((err) => {
-        lastBestStrategy = null;
-        bestStrategyLine.textContent = "Failed to load best strategy: " + err.message;
-        setBestStrategyButtons("find");
-      });
+    setSelectValue(onAvoidHighSelect, best.onAvoidHigh);
+    setSelectValue(onAvoidLowSelect, best.onAvoidLow);
   }
 
   function runFindBestStrategy() {
@@ -270,10 +174,10 @@
       findBestBtn.disabled = true;
       findBestBtn.textContent = "Searching…";
     }
-    lastBestStrategy = null;
-    bestStrategyLine.textContent =
-      "Running strategy search for " + ticker + " (" + from + " → " + to + ")… this can take a minute.";
-    setBestStrategyButtons("find");
+    const force = Boolean(recomputeCheckbox && recomputeCheckbox.checked);
+    meta.textContent = force
+      ? "Recomputing best strategy for " + ticker + " (" + from + " → " + to + ")… this can take a minute."
+      : "Finding best strategy for " + ticker + " (" + from + " → " + to + ")… a new search can take a minute.";
 
     fetch(apiUrl("api/backtest/optimize"), {
       method: "POST",
@@ -287,7 +191,8 @@
         to: to,
         cash: Number(cashInput.value) || 10000,
         top: 10,
-        param: Number(DEFAULT_PARAM_ID)
+        param: Number(DEFAULT_PARAM_ID),
+        force: force
       })
     })
       .then((response) => response.text().then((text) => {
@@ -303,13 +208,23 @@
         return data;
       }))
       .then((data) => {
-        renderBestStrategy(data);
+        if (force && recomputeCheckbox) {
+          // The fresh result is saved; later clicks can reuse it.
+          recomputeCheckbox.checked = false;
+        }
+        if (data && data.found && data.best) {
+          applyBestStrategyToForm(data.best);
+          return runBacktest({
+            label: "Best strategy",
+            note: data.cached ? "reused saved result" : "just computed"
+          });
+        }
+        meta.textContent = "No best strategy found for " + ticker + " (" + from + " → " + to + ").";
+        return undefined;
       })
       .catch((err) => {
-        lastBestStrategy = null;
-        bestStrategyLine.textContent = "Find best strategy failed: " + err.message;
-        setBestStrategyButtons("find");
-        showError("Find best strategy failed: " + err.message);
+        meta.textContent = "Best strategy failed.";
+        showError("Best strategy failed: " + err.message);
       })
       .finally(() => {
         if (findBestBtn) {
@@ -354,11 +269,6 @@
   function renderSummary(data) {
     const r = data.result || {};
     const bh = data.buyAndHold || {};
-    strategyLine.textContent =
-      data.ticker + " · " + data.from + " → " + data.to +
-      " · " + data.tradingDays + " day(s) (" + data.daysWithAction + " with action) · " +
-      data.strategy;
-
     const equityClass = Number(r.endingEquity) < Number(bh.endingEquity) ? "down" : "up";
     summary.innerHTML =
       '<div class="backtest-metric">' +
@@ -409,14 +319,18 @@
     }).join("");
   }
 
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
+  /**
+   * @param kind {label: "Best strategy" | "Customized test", note: extra text shown with the dates}
+   */
+  function runBacktest(kind) {
     clearError();
     results.hidden = true;
     runBtn.disabled = true;
     runBtn.textContent = "Running…";
-
-    loadBestStrategy();
+    if (kind.label === "Customized test") {
+      meta.textContent = "Running customized test for " + tickerSelect.value +
+        " (" + fromInput.value + " → " + toInput.value + ")…";
+    }
 
     const payload = {
       ticker: tickerSelect.value,
@@ -428,10 +342,12 @@
       minSellConfidence: Number(sellConfInput.value),
       onBuy: onBuySelect ? onBuySelect.value : "BUY_PART",
       onSell: onSellSelect ? onSellSelect.value : "SELL_PART",
-      onAvoid: onAvoidSelect ? onAvoidSelect.value : "SELL_PART"
+      onAvoidHigh: onAvoidHighSelect ? onAvoidHighSelect.value : "SELL_PART",
+      onAvoidLow: onAvoidLowSelect ? onAvoidLowSelect.value : "SELL_PART",
+      param: Number(DEFAULT_PARAM_ID)
     };
 
-    fetch(apiUrl("api/backtest"), {
+    return fetch(apiUrl("api/backtest"), {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -452,18 +368,27 @@
         return data;
       }))
       .then((data) => {
+        meta.textContent = kind.label + " for " + data.ticker +
+          " (" + data.from + " → " + data.to + (kind.note ? ", " + kind.note : "") + ")" +
+          " · " + data.tradingDays + " trading days, " + data.daysWithAction + " with action.";
         renderSummary(data);
         renderTrades(data.trades || []);
         results.hidden = false;
         results.scrollIntoView({ behavior: "smooth", block: "start" });
       })
       .catch((err) => {
-        showError("Backtest failed: " + err.message);
+        meta.textContent = kind.label + " failed.";
+        showError(kind.label + " failed: " + err.message);
       })
       .finally(() => {
         runBtn.disabled = false;
         runBtn.textContent = "Run backtest";
       });
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runBacktest({ label: "Customized test", note: "" });
   });
 
   setDefaults();
@@ -474,11 +399,6 @@
   if (findBestBtn) {
     findBestBtn.addEventListener("click", () => {
       runFindBestStrategy();
-    });
-  }
-  if (applyBestBtn) {
-    applyBestBtn.addEventListener("click", () => {
-      applyBestStrategyToForm(lastBestStrategy);
     });
   }
 })();

@@ -1,5 +1,6 @@
 package com.stocksugg.db;
 
+import com.stocksugg.stock.AvoidClassifier;
 import com.stocksugg.stock.BacktestDay;
 import com.stocksugg.stock.StockDayView;
 import com.stocksugg.stock.StockRow;
@@ -79,14 +80,14 @@ public final class StockRepository {
             """;
 
     private static final String SELECT_BACKTEST_DAYS = """
-            SELECT "date", close, suggestedAction, confidence
+            SELECT "date", close, rsi14, ma20, suggestedAction, confidence
             FROM stock
             WHERE ticker = ? AND "date" >= ? AND "date" <= ?
             ORDER BY "date"
             """;
 
     private static final String SELECT_BACKTEST_DAYS_WITH_PARAM = """
-            SELECT s."date" AS "date", s.close AS close,
+            SELECT s."date" AS "date", s.close AS close, s.rsi14 AS rsi14, s.ma20 AS ma20,
                    g.suggestedaction AS suggestedAction,
                    g.confidence AS confidence
             FROM stock s
@@ -139,17 +140,11 @@ public final class StockRepository {
             ) prev ON s.ticker = prev.ticker AND s."date" = prev.prev_date
             """;
 
-    /** RSI at or above this marks an AVOID as overextended ({@code avoidSide = HIGH}). */
-    private static final float AVOID_HIGH_RSI = 60f;
-
-    /** Close above {@code ma20 * this} marks an AVOID as overextended ({@code avoidSide = HIGH}). */
-    private static final float AVOID_HIGH_MA20_STRETCH = 1.05f;
-
     /**
      * Most recent {@code n} trading days (ending on {@code date}) of suggestion labels for each
      * ticker that has a row on {@code date}, oldest first within each ticker.
-     * {@code avoidSide} splits AVOID into HIGH (overextended / take profit) and LOW (weak / broken)
-     * from that day's indicators; it is null for other actions or when indicators are missing.
+     * {@code avoidSide} mirrors {@link AvoidClassifier#side} in SQL: HIGH (overextended / take
+     * profit) or LOW (weak / broken); null for other actions or when indicators are missing.
      */
     private static final String SELECT_RECENT_ACTIONS = """
             SELECT ticker, "date", suggestedAction, avoidSide
@@ -428,7 +423,8 @@ public final class StockRepository {
     }
 
     /**
-     * Close price + suggestedAction for ticker in [{@code from}, {@code to}], ascending by date.
+     * Close price + suggestedAction (with AVOID HIGH/LOW side) for ticker in
+     * [{@code from}, {@code to}], ascending by date.
      * Days with a null close are omitted. Uses legacy columns on {@code stock}.
      */
     public List<BacktestDay> findBacktestDays(String ticker, LocalDate from, LocalDate to)
@@ -473,11 +469,13 @@ public final class StockRepository {
         if (close == null) {
             return;
         }
+        String action = rs.getString("suggestedAction");
         days.add(new BacktestDay(
                 LocalDate.parse(rs.getString("date")),
                 close,
-                rs.getString("suggestedAction"),
-                getFloat(rs, "confidence")));
+                action,
+                getFloat(rs, "confidence"),
+                AvoidClassifier.side(action, getFloat(rs, "rsi14"), close, getFloat(rs, "ma20"))));
     }
 
     /** OHLC bars for ticker in [{@code from}, {@code to}], ascending by date. */
@@ -603,8 +601,8 @@ public final class StockRepository {
             LocalDate date, long paramId, int days) throws SQLException {
         Map<String, List<Map<String, Object>>> byTicker = new HashMap<>();
         try (PreparedStatement ps = connection.prepareStatement(SELECT_RECENT_ACTIONS)) {
-            ps.setFloat(1, AVOID_HIGH_RSI);
-            ps.setFloat(2, AVOID_HIGH_MA20_STRETCH);
+            ps.setFloat(1, AvoidClassifier.HIGH_RSI);
+            ps.setFloat(2, AvoidClassifier.HIGH_MA20_STRETCH);
             ps.setLong(3, paramId);
             ps.setString(4, date.toString());
             ps.setString(5, date.toString());

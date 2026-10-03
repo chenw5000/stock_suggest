@@ -62,7 +62,11 @@ public final class BacktestApi {
 
         BacktestStrategy.TradeIntent buyIntent = parseBuyIntent(text(root, "onBuy"), parts);
         BacktestStrategy.TradeIntent sellIntent = parseExitIntent(text(root, "onSell"), parts, "onSell");
-        BacktestStrategy.TradeIntent avoidIntent = parseExitIntent(text(root, "onAvoid"), parts, "onAvoid");
+        String legacyAvoid = text(root, "onAvoid");
+        BacktestStrategy.TradeIntent avoidHighIntent =
+                parseExitIntent(textOr(root, "onAvoidHigh", legacyAvoid), parts, "onAvoidHigh");
+        BacktestStrategy.TradeIntent avoidLowIntent =
+                parseExitIntent(textOr(root, "onAvoidLow", legacyAvoid), parts, "onAvoidLow");
 
         BacktestStrategy strategy = new BacktestStrategy(
                 parts,
@@ -71,11 +75,13 @@ public final class BacktestApi {
                 buyIntent,
                 sellIntent,
                 BacktestStrategy.TradeIntent.NONE,
-                avoidIntent);
+                avoidHighIntent,
+                avoidLowIntent);
+        long paramId = paramIdFrom(root);
 
         try (Database db = new Database()) {
             StockRepository repository = new StockRepository(db);
-            List<BacktestDay> days = repository.findBacktestDays(symbol, from, to);
+            List<BacktestDay> days = repository.findBacktestDays(symbol, from, to, paramId);
             if (days.isEmpty()) {
                 throw new IllegalArgumentException(
                         "No rows found for " + symbol + " in " + from + " .. " + to);
@@ -90,6 +96,7 @@ public final class BacktestApi {
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("ticker", symbol);
+            body.put("paramId", paramId);
             body.put("from", from.toString());
             body.put("to", to.toString());
             body.put("cash", cash);
@@ -98,7 +105,8 @@ public final class BacktestApi {
             body.put("minSellConfidence", sellConf);
             body.put("onBuy", buyIntent.name());
             body.put("onSell", sellIntent.name());
-            body.put("onAvoid", avoidIntent.name());
+            body.put("onAvoidHigh", avoidHighIntent.name());
+            body.put("onAvoidLow", avoidLowIntent.name());
             body.put("strategy", strategy.toString());
             body.put("tradingDays", days.size());
             body.put("daysWithAction", withAction);
@@ -129,7 +137,7 @@ public final class BacktestApi {
     }
 
     /**
-     * Exit intent for SELL or AVOID. Accepts {@code SELL_PART}, {@code SELL_ALL}, or {@code NONE}
+     * Exit intent for SELL or AVOID (HIGH / LOW). Accepts {@code SELL_PART}, {@code SELL_ALL}, or {@code NONE}
      * (also {@code NO_ACTION}). When omitted, defaults to SELL_PART (SELL_ALL if parts == 1).
      */
     private static BacktestStrategy.TradeIntent parseExitIntent(
@@ -247,8 +255,9 @@ public final class BacktestApi {
     }
 
     /**
-     * Runs the same strategy grid-search as CLI {@code --optimize}, saves rank=1,
-     * and returns the saved row.
+     * Returns the saved rank=1 row when one matches ticker, param, from, to and cash exactly
+     * (unless {@code "force": true}); otherwise runs the same strategy grid-search as CLI
+     * {@code --optimize}, saves rank=1, and returns the saved row.
      */
     public static String optimizeJson(String requestBody) throws Exception {
         JsonNode root = SuggestApi.mapper().readTree(requestBody == null ? "{}" : requestBody);
@@ -273,22 +282,24 @@ public final class BacktestApi {
             throw new IllegalArgumentException("top must be >= 1");
         }
 
-        long paramId = GeminiStockAdvisor.DEFAULT_PARAM_ID;
-        JsonNode paramNode = root.get("param");
-        if (paramNode == null || paramNode.isNull()) {
-            paramNode = root.get("paramId");
-        }
-        if (paramNode != null && !paramNode.isNull() && !paramNode.asText().isBlank()) {
-            paramId = parseParamId(paramNode.isNumber()
-                    ? Long.toString(paramNode.asLong())
-                    : paramNode.asText());
-        }
+        long paramId = paramIdFrom(root);
+        boolean force = root.path("force").asBoolean(false);
 
-        StrategyOptimize saved = App.optimizeAndSave(ticker, from, to, cash, topN, paramId);
-        // Re-read so id / computed_at match the DB row when available.
-        try (Database db = new Database()) {
-            StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
-            saved = repo.findByKey(saved.ticker(), saved.paramId(), from, to, 1).orElse(saved);
+        StrategyOptimize saved = null;
+        if (!force) {
+            try (Database db = new Database()) {
+                StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+                saved = repo.findExactBest(ticker, paramId, from, to, cash).orElse(null);
+            }
+        }
+        boolean cached = saved != null;
+        if (!cached) {
+            saved = App.optimizeAndSave(ticker, from, to, cash, topN, paramId);
+            // Re-read so id / computed_at match the DB row when available.
+            try (Database db = new Database()) {
+                StrategyOptimizeRepository repo = new StrategyOptimizeRepository(db);
+                saved = repo.findByKey(saved.ticker(), saved.paramId(), from, to, 1).orElse(saved);
+            }
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -297,6 +308,7 @@ public final class BacktestApi {
         body.put("requestedFrom", from.toString());
         body.put("requestedTo", to.toString());
         body.put("found", true);
+        body.put("cached", cached);
         body.put("best", toMap(saved));
         return SuggestApi.mapper().writeValueAsString(body);
     }
@@ -315,7 +327,8 @@ public final class BacktestApi {
         map.put("onBuy", row.onBuy());
         map.put("onSell", row.onSell());
         map.put("onHold", row.onHold());
-        map.put("onAvoid", row.onAvoid());
+        map.put("onAvoidHigh", row.onAvoidHigh());
+        map.put("onAvoidLow", row.onAvoidLow());
         map.put("endingEquity", row.endingEquity());
         map.put("endingCash", row.endingCash());
         map.put("endingShares", row.endingShares());
@@ -356,7 +369,7 @@ public final class BacktestApi {
             row.put("cashAfter", trade.cashAfter());
             row.put("sharesAfter", trade.sharesAfter());
             row.put("equityAfter", trade.equityAfter());
-            row.put("suggestedAction", trade.day().suggestedAction());
+            row.put("suggestedAction", trade.day().actionKey());
             row.put("confidence", trade.day().confidence());
             out.add(row);
         }
@@ -369,6 +382,11 @@ public final class BacktestApi {
             return null;
         }
         return node.asText();
+    }
+
+    private static String textOr(JsonNode root, String field, String fallback) {
+        String value = text(root, field);
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private static double number(JsonNode root, String field, double defaultValue) {
@@ -384,6 +402,20 @@ public final class BacktestApi {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(field + " must be a number");
         }
+    }
+
+    /** {@code param} (or {@code paramId}) from a JSON body; defaults to the baseline param. */
+    private static long paramIdFrom(JsonNode root) {
+        JsonNode paramNode = root.get("param");
+        if (paramNode == null || paramNode.isNull()) {
+            paramNode = root.get("paramId");
+        }
+        if (paramNode == null || paramNode.isNull() || paramNode.asText().isBlank()) {
+            return GeminiStockAdvisor.DEFAULT_PARAM_ID;
+        }
+        return parseParamId(paramNode.isNumber()
+                ? Long.toString(paramNode.asLong())
+                : paramNode.asText());
     }
 
     private static long parseParamId(String paramRaw) {

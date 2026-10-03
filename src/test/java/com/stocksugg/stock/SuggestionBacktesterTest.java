@@ -101,6 +101,52 @@ class SuggestionBacktesterTest {
         assertTrue(result.trades().stream().anyMatch(t -> "SELL_PART".equals(t.event())));
     }
 
+    @Test
+    void avoidHighAndLowUseSeparateIntents() {
+        BacktestStrategy holdOnHigh = new BacktestStrategy(
+                4, 0, 0,
+                BacktestStrategy.TradeIntent.BUY_PART,
+                BacktestStrategy.TradeIntent.SELL_PART,
+                BacktestStrategy.TradeIntent.NONE,
+                BacktestStrategy.TradeIntent.NONE,
+                BacktestStrategy.TradeIntent.SELL_ALL);
+        List<BacktestDay> days = List.of(
+                day("2026-01-02", 100f, "BUY"),
+                avoid("2026-01-03", 110f, AvoidClassifier.HIGH),
+                avoid("2026-01-06", 90f, AvoidClassifier.LOW));
+
+        SuggestionBacktester.Result result = SuggestionBacktester.run(10_000, holdOnHigh, days);
+
+        assertEquals(1, result.sellCount());
+        assertEquals(0, result.endingShares());
+        // 25 @ 100 held through AVOID_HIGH, sold @ 90 on AVOID_LOW → 7500 + 2250
+        assertEquals(9_750.0, result.endingEquity(), 0.01);
+        assertEquals("2026-01-06", result.trades().getLast().day().date().toString());
+    }
+
+    @Test
+    void unclassifiedAvoidFollowsLowIntent() {
+        BacktestStrategy strategy = new BacktestStrategy(
+                1, 0, 0,
+                BacktestStrategy.TradeIntent.BUY_ALL,
+                BacktestStrategy.TradeIntent.SELL_ALL,
+                BacktestStrategy.TradeIntent.NONE,
+                BacktestStrategy.TradeIntent.NONE,
+                BacktestStrategy.TradeIntent.SELL_ALL);
+        List<BacktestDay> days = List.of(
+                day("2026-01-02", 100f, "BUY"),
+                day("2026-01-03", 95f, "AVOID"));
+
+        SuggestionBacktester.Result result = SuggestionBacktester.run(10_000, strategy, days);
+
+        assertEquals(0, result.endingShares());
+        assertEquals(9_500.0, result.endingEquity(), 0.01);
+    }
+
+    private static BacktestDay avoid(String date, float close, String side) {
+        return new BacktestDay(LocalDate.parse(date), close, "AVOID", null, side);
+    }
+
     private static BacktestDay day(String date, float close, String action) {
         return new BacktestDay(LocalDate.parse(date), close, action);
     }
