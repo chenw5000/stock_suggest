@@ -291,6 +291,108 @@ public final class WebServer {
                 }
             });
 
+            config.routes.get("/api/performance", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(PerformanceApi.weekJson(
+                            ctx.queryParam("week"), ctx.queryParam("param")));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to load weekly performance: " + e.getMessage()));
+                }
+            });
+
+            config.routes.get("/api/performance/weeks", ctx -> {
+                try {
+                    ctx.contentType("application/json")
+                            .result(PerformanceApi.weeksJson(ctx.queryParam("param")));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to load weekly performance: " + e.getMessage()));
+                }
+            });
+
+            config.routes.get("/api/performance/status", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(PerformanceApi.statusJson());
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to read weekly performance status: " + e.getMessage()));
+                }
+            });
+
+            config.routes.post("/api/performance/run", ctx -> {
+                try {
+                    PerformanceApi.Response response = PerformanceApi.runJson(ctx.body());
+                    ctx.status(response.status()).contentType("application/json").result(response.json());
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to start weekly performance: " + e.getMessage()));
+                }
+            });
+
+            config.routes.post("/api/performance/backfill", ctx -> {
+                try {
+                    PerformanceApi.Response response = PerformanceApi.backfillJson(ctx.body());
+                    ctx.status(response.status()).contentType("application/json").result(response.json());
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to start weekly performance backfill: " + e.getMessage()));
+                }
+            });
+
+            config.routes.get("/api/walkforward", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(WalkForwardApi.runJson(
+                            ctx.queryParam("id"), ctx.queryParam("param")));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to load walk-forward results: " + e.getMessage()));
+                }
+            });
+
+            config.routes.get("/api/walkforward/runs", ctx -> {
+                try {
+                    ctx.contentType("application/json")
+                            .result(WalkForwardApi.runsJson(ctx.queryParam("param")));
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to load walk-forward runs: " + e.getMessage()));
+                }
+            });
+
+            config.routes.get("/api/walkforward/status", ctx -> {
+                try {
+                    ctx.contentType("application/json").result(WalkForwardApi.statusJson());
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to read walk-forward status: " + e.getMessage()));
+                }
+            });
+
+            config.routes.post("/api/walkforward/run", ctx -> {
+                try {
+                    WalkForwardApi.Response response = WalkForwardApi.startJson(ctx.body());
+                    ctx.status(response.status()).contentType("application/json").result(response.json());
+                } catch (IllegalArgumentException e) {
+                    ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", e.getMessage()));
+                } catch (Exception e) {
+                    ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of(
+                            "error", "Failed to start walk-forward: " + e.getMessage()));
+                }
+            });
+
             config.routes.get("/suggest/{date}", ctx -> {
                 String rawDate = ctx.pathParam("date");
                 try {

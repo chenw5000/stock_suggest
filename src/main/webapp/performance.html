@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockSugg — weekly performance</title>
+  <link rel="stylesheet" href="css/suggest.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <h1>Weekly performance</h1>
+        <p class="meta" id="meta">Loading…</p>
+      </div>
+      <div class="perf-controls">
+        <form id="view-form" class="date-form">
+          <label for="week">Week ending</label>
+          <select id="week" disabled></select>
+        </form>
+        <form id="run-form" class="date-form">
+          <label for="run-week">Run for</label>
+          <input id="run-week" type="date" title="Any day of the week; the week's Friday close is used">
+          <label class="backtest-check" for="recompute" title="Search the training-window best strategies again instead of reusing saved ones">
+            <input id="recompute" type="checkbox"> Recompute strategies
+          </label>
+          <button type="submit" id="run-btn">Run now</button>
+        </form>
+      </div>
+    </header>
+    <p class="status" id="job-status" hidden></p>
+    <p class="error" id="error" hidden></p>
+
+    <section id="summary-section" hidden>
+      <p class="meta" id="windows-line"></p>
+      <div class="backtest-summary" id="summary"></div>
+    </section>
+
+    <section class="perf-charts" id="charts" hidden>
+      <div class="chart-panel">
+        <h2 class="section-title">Stocks beating Buy &amp; Hold, per week</h2>
+        <div class="chart-canvas-box">
+          <canvas id="beat-chart"></canvas>
+        </div>
+      </div>
+      <div class="chart-panel">
+        <h2 class="section-title">3-month return: strategy vs Buy &amp; Hold</h2>
+        <div class="chart-canvas-box">
+          <canvas id="return-chart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <div class="table-wrap" id="table-wrap">
+      <p class="empty" id="empty" hidden>No weekly snapshot yet.</p>
+      <table id="perf-table" class="perf-table" hidden>
+        <thead>
+          <tr>
+            <th>ticker</th>
+            <th>strategy (from training window)</th>
+            <th>train return</th>
+            <th>trades</th>
+            <th>strategy equity</th>
+            <th>strategy return</th>
+            <th>buy &amp; hold equity</th>
+            <th>buy &amp; hold return</th>
+            <th>difference</th>
+            <th>beat</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="perf-body"></tbody>
+      </table>
+    </div>
+
+    <section class="backtest-panel perf-backfill">
+      <h2 class="section-title">Backfill past weeks</h2>
+      <form id="backfill-form" class="date-form">
+        <label for="backfill-weeks">Last</label>
+        <input id="backfill-weeks" type="number" min="1" max="104" value="12">
+        <label for="backfill-weeks">weeks</label>
+        <button type="submit" id="backfill-btn">Backfill</button>
+      </form>
+      <p class="meta">Computes the missing weeks, oldest first, and skips weeks that are already up to date (unless "Recompute strategies" is checked). Weeks without 6 months of suggestion data are not saved.</p>
+    </section>
+
+    <p class="meta">
+      <a href="index.html">← Home</a>
+      · <a href="suggest-summary.html">Summary</a>
+      · <a href="history.html">Ticker history</a>
+      · <a href="backtest.html">Backtest</a>
+      · <a href="walkforward.html">Walk-forward</a>
+      · <a href="admin.html">Admin</a>
+    </p>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+  <script src="js/performance.js"></script>
+</body>
+</html>

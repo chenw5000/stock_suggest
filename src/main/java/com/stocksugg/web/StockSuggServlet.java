@@ -29,6 +29,10 @@ import java.util.stream.Collectors;
         "/api/batch",
         "/api/backtest",
         "/api/backtest/*",
+        "/api/performance",
+        "/api/performance/*",
+        "/api/walkforward",
+        "/api/walkforward/*",
         "/api/tuning-params",
         "/suggest/*"
 })
@@ -106,8 +110,123 @@ public final class StockSuggServlet extends HttpServlet {
             return;
         }
 
+        if ("/api/performance".equals(path)) {
+            writePerformanceGet(req, resp);
+            return;
+        }
+
+        if ("/api/walkforward".equals(path)) {
+            writeWalkForwardGet(req, resp);
+            return;
+        }
+
         if ("/suggest".equals(path)) {
             redirectToSuggestPage(req, resp);
+        }
+    }
+
+    private static void writePerformanceGet(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String segment = extractPathSegment(req.getPathInfo());
+        try {
+            String json;
+            if (segment == null) {
+                json = PerformanceApi.weekJson(req.getParameter("week"), req.getParameter("param"));
+            } else if ("weeks".equalsIgnoreCase(segment)) {
+                json = PerformanceApi.weeksJson(req.getParameter("param"));
+            } else if ("status".equalsIgnoreCase(segment)) {
+                json = PerformanceApi.statusJson();
+            } else {
+                writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
+                        "error", "Unknown performance path. Use /api/performance, "
+                                + "/api/performance/weeks or /api/performance/status."));
+                return;
+            }
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(json);
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to load weekly performance: " + e.getMessage()));
+        }
+    }
+
+    private static void writePerformancePost(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String segment = extractPathSegment(req.getPathInfo());
+        String body = req.getReader().lines().collect(Collectors.joining("\n"));
+        try {
+            PerformanceApi.Response response;
+            if ("run".equalsIgnoreCase(segment)) {
+                response = PerformanceApi.runJson(body);
+            } else if ("backfill".equalsIgnoreCase(segment)) {
+                response = PerformanceApi.backfillJson(body);
+            } else {
+                writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
+                        "error", "Unknown performance path. Use POST /api/performance/run "
+                                + "or /api/performance/backfill."));
+                return;
+            }
+            resp.setStatus(response.status());
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(response.json());
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to start weekly performance: " + e.getMessage()));
+        }
+    }
+
+    private static void writeWalkForwardGet(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String segment = extractPathSegment(req.getPathInfo());
+        try {
+            String json;
+            if (segment == null) {
+                json = WalkForwardApi.runJson(req.getParameter("id"), req.getParameter("param"));
+            } else if ("runs".equalsIgnoreCase(segment)) {
+                json = WalkForwardApi.runsJson(req.getParameter("param"));
+            } else if ("status".equalsIgnoreCase(segment)) {
+                json = WalkForwardApi.statusJson();
+            } else {
+                writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
+                        "error", "Unknown walk-forward path. Use /api/walkforward, "
+                                + "/api/walkforward/runs or /api/walkforward/status."));
+                return;
+            }
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(json);
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to load walk-forward results: " + e.getMessage()));
+        }
+    }
+
+    private static void writeWalkForwardPost(HttpServletRequest req, HttpServletResponse resp)
+            throws IOException {
+        String segment = extractPathSegment(req.getPathInfo());
+        if (!"run".equalsIgnoreCase(segment)) {
+            writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
+                    "error", "Unknown walk-forward path. Use POST /api/walkforward/run."));
+            return;
+        }
+        String body = req.getReader().lines().collect(Collectors.joining("\n"));
+        try {
+            WalkForwardApi.Response response = WalkForwardApi.startJson(body);
+            resp.setStatus(response.status());
+            resp.setContentType("application/json; charset=UTF-8");
+            resp.getWriter().write(response.json());
+        } catch (IllegalArgumentException e) {
+            writeJson(resp, HttpServletResponse.SC_BAD_REQUEST, Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            writeJson(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, Map.of(
+                    "error", "Failed to start walk-forward: " + e.getMessage()));
         }
     }
 
@@ -139,6 +258,14 @@ public final class StockSuggServlet extends HttpServlet {
             }
             writeJson(resp, HttpServletResponse.SC_NOT_FOUND, Map.of(
                     "error", "Unknown backtest path. Use POST /api/backtest or /api/backtest/optimize."));
+            return;
+        }
+        if ("/api/performance".equals(path)) {
+            writePerformancePost(req, resp);
+            return;
+        }
+        if ("/api/walkforward".equals(path)) {
+            writeWalkForwardPost(req, resp);
             return;
         }
         if ("/api/admin".equals(path)) {

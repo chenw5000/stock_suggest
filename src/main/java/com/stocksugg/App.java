@@ -6,9 +6,13 @@ import com.stocksugg.db.StrategyOptimizeRepository;
 import com.stocksugg.gemini.GeminiConfig;
 import com.stocksugg.gemini.GeminiService;
 import com.stocksugg.stock.BacktestDay;
+import com.stocksugg.stock.GeminiPrompts;
 import com.stocksugg.stock.GeminiStockAdvisor;
 import com.stocksugg.stock.GeminiSuggestion;
 import com.stocksugg.stock.MarketSession;
+import com.stocksugg.stock.PerformanceRunner;
+import com.stocksugg.stock.PerformanceWeek;
+import com.stocksugg.stock.PromptExperiment;
 import com.stocksugg.stock.StockDataImporter;
 import com.stocksugg.stock.StockRow;
 import com.stocksugg.stock.StrategyOptimize;
@@ -16,6 +20,7 @@ import com.stocksugg.stock.SuggestionBacktester;
 import com.stocksugg.stock.SuggestionStrategyOptimizer;
 import com.stocksugg.stock.TechnicalIndicators;
 import com.stocksugg.stock.TickerList;
+import com.stocksugg.stock.TuningParams;
 import com.stocksugg.web.WebServer;
 
 import java.time.LocalDate;
@@ -27,7 +32,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.sql.SQLException;
 
 public class App {
 
@@ -96,7 +100,7 @@ public class App {
                 + BATCH_ADVICE_CHUNK_SIZE + " (param_id=" + paramId + ") ...");
 
         try (Database db = new Database();
-             GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.5-flash-lite"))) {
+             GeminiService gemini = new GeminiService(new GeminiConfig())) {
             GeminiStockAdvisor advisor = new GeminiStockAdvisor(db, gemini);
 
             for (int i = 0; i < tickers.size(); i += BATCH_ADVICE_CHUNK_SIZE) {
@@ -204,7 +208,7 @@ public class App {
         System.out.println("Backfilling Gemini suggestions for " + symbol
                 + " from " + from + " to " + to + " (param_id=" + paramId + ") ...");
         try (Database db = new Database();
-             GeminiService gemini = new GeminiService(new GeminiConfig("gemini-3.5-flash-lite"))) {
+             GeminiService gemini = new GeminiService(new GeminiConfig())) {
             StockRepository repository = new StockRepository(db);
             GeminiStockAdvisor advisor = new GeminiStockAdvisor(db, gemini);
             List<LocalDate> dates = repository.findDatesInRange(symbol, from, to);
@@ -257,6 +261,11 @@ public class App {
                 synchronized (BATCH_LOCK) {
                     batchRunning = false;
                 }
+            }
+            try {
+                PerformanceRunner.startLatestIfNeeded(GeminiStockAdvisor.DEFAULT_PARAM_ID);
+            } catch (Exception e) {
+                System.err.println("Weekly performance check after batch failed: " + e.getMessage());
             }
         }, "stocksugg-batch");
         worker.setDaemon(true);
@@ -476,22 +485,6 @@ public class App {
 
             SuggestionStrategyOptimizer.Candidate best = report.top().getFirst();
             StrategyOptimizeRepository optimizeRepo = new StrategyOptimizeRepository(db);
-            Optional<StrategyOptimize> existing = optimizeRepo.findBestNearWindow(
-                    symbol, paramId, from, to, 7);
-            existing.ifPresent(old -> {
-                try {
-                    int removed = optimizeRepo.deleteByWindow(
-                            old.ticker(), old.paramId(), old.fromDate(), old.toDate());
-                    if (removed > 0) {
-                        System.out.println("Replaced prior saved strategy for "
-                                + old.ticker() + " " + old.fromDate() + " .. " + old.toDate()
-                                + " (" + removed + " row(s) deleted)");
-                    }
-                } catch (SQLException e) {
-                    throw new IllegalStateException(
-                            "Failed to delete prior strategy_optimize row: " + e.getMessage(), e);
-                }
-            });
             StrategyOptimize bestRow = StrategyOptimize.fromSearch(
                     symbol,
                     paramId,
@@ -546,9 +539,138 @@ public class App {
         }
     }
 
+    private static void runPerformance(
+            boolean backfill, String week, int weeks, long paramId, boolean recompute) {
+        try {
+            if (!backfill) {
+                LocalDate weekEnding = PerformanceRunner.resolveWeekEnding(
+                        week == null ? null : LocalDate.parse(week));
+                PerformanceRunner.runWeek(weekEnding, paramId, recompute,
+                        PerformanceWeek.TRIGGER_MANUAL, true, null);
+                return;
+            }
+            LocalDate latest = PerformanceRunner.latestWeekEnding();
+            for (int i = weeks - 1; i >= 0; i--) {
+                LocalDate weekEnding = latest.minusWeeks(i);
+                if (!recompute && PerformanceRunner.isUpToDate(weekEnding, paramId)) {
+                    System.out.println("Week ending " + weekEnding + " is up to date; skipped.");
+                    continue;
+                }
+                try {
+                    PerformanceRunner.runWeek(weekEnding, paramId, recompute,
+                            PerformanceWeek.TRIGGER_BACKFILL, false, null);
+                } catch (IllegalArgumentException e) {
+                    System.out.println("Week ending " + weekEnding + ": " + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Weekly performance failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     private static void printSearchResult(String label, SuggestionBacktester.Result result) {
         System.out.printf(Locale.US, "%-40s  equity=$%,.2f  return=%+.2f%%%n",
                 label, result.endingEquity(), result.returnPct());
+    }
+
+    private static void runPromptSetup(long baseParamId) {
+        try (Database db = new Database()) {
+            Map<String, TuningParams> rows = PromptExperiment.setup(db, baseParamId);
+            rows.forEach((version, row) -> System.out.println(
+                    "prompt " + version + " -> tuning_params id=" + row.id() + " (" + row.name() + ")"));
+        } catch (Exception e) {
+            System.err.println("Prompt setup failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private static void runPromptCreate(
+            long baseParamId, String version, Double temperature, Integer seed, String name) {
+        if (name.isBlank()) {
+            System.err.println("--prompt-create needs --name=...");
+            return;
+        }
+        try (Database db = new Database()) {
+            TuningParams row = PromptExperiment.create(db, baseParamId, version, temperature, seed, name);
+            System.out.println("prompt " + row.promptVersionOrDefault() + ", temperature "
+                    + (row.temperature() == null ? "default" : row.temperature())
+                    + ", seed " + (row.seed() == null ? "none" : row.seed())
+                    + " -> tuning_params id=" + row.id() + " (" + row.name() + ")");
+        } catch (Exception e) {
+            System.err.println("Prompt create failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private static void runPromptBackfill(
+            String ticker, LocalDate from, LocalDate to, List<Long> paramIds, String model) {
+        if (paramIds.isEmpty()) {
+            System.err.println("--prompt-backfill needs --param-ids=...");
+            return;
+        }
+        try (Database db = new Database();
+             GeminiService gemini = new GeminiService(new GeminiConfig(model))) {
+            System.out.println("Prompt backfill model: " + gemini.model());
+            GeminiStockAdvisor advisor = new GeminiStockAdvisor(db, gemini);
+            for (long paramId : paramIds) {
+                PromptExperiment.backfillMissing(db, advisor, ticker, from, to, paramId);
+            }
+        } catch (Exception e) {
+            System.err.println("Prompt backfill failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private static void runPromptScore(
+            String ticker,
+            LocalDate from,
+            LocalDate testFrom,
+            LocalDate to,
+            List<Long> paramIds,
+            Long controlParamId,
+            String outName) {
+        if (paramIds.isEmpty()) {
+            System.err.println("--prompt-score needs --param-ids=...");
+            return;
+        }
+        try (Database db = new Database()) {
+            List<PromptExperiment.Score> scores =
+                    PromptExperiment.score(db, ticker, from, testFrom, to, paramIds, controlParamId);
+            Double[][] agreement = PromptExperiment.agreementMatrix(db, ticker, from, to, paramIds);
+            System.out.println(PromptExperiment.format(scores, ticker, from, testFrom, to));
+            System.out.println(PromptExperiment.formatAgreement(paramIds, agreement));
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("ticker", ticker);
+            body.put("from", from.toString());
+            body.put("testFrom", testFrom.toString());
+            body.put("to", to.toString());
+            body.put("paramIds", paramIds);
+            body.put("agreementPct", agreement);
+            body.put("scores", scores);
+            java.nio.file.Path out = java.nio.file.Path.of("target",
+                    outName == null ? "prompt-experiment-" + ticker + ".json" : outName);
+            java.nio.file.Files.createDirectories(out.getParent());
+            java.nio.file.Files.writeString(out,
+                    com.stocksugg.web.SuggestApi.mapper().writerWithDefaultPrettyPrinter().writeValueAsString(body));
+            System.out.println("Full scorecard written to " + out.toAbsolutePath());
+        } catch (Exception e) {
+            System.err.println("Prompt score failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private static List<Long> parseIds(String raw) {
+        List<Long> ids = new ArrayList<>();
+        if (raw == null || raw.isBlank()) {
+            return ids;
+        }
+        for (String part : raw.split(",")) {
+            if (!part.isBlank()) {
+                ids.add(Long.parseLong(part.trim()));
+            }
+        }
+        return ids;
     }
 
     private static String argValue(List<String> args, String name, String defaultValue) {
@@ -572,6 +694,63 @@ public class App {
         boolean backtest = argList.contains("--backtest");
         boolean optimize = argList.contains("--optimize");
         boolean updateRsi = argList.contains("--update-rsi");
+        boolean performance = argList.contains("--performance");
+        boolean performanceBackfill = argList.contains("--performance-backfill");
+        boolean promptSetup = argList.contains("--prompt-setup");
+        boolean promptCreate = argList.contains("--prompt-create");
+        boolean promptBackfill = argList.contains("--prompt-backfill");
+        boolean promptScore = argList.contains("--prompt-score");
+
+        if (promptSetup) {
+            long baseParamId = Long.parseLong(argValue(argList, "--base-param-id",
+                    String.valueOf(GeminiStockAdvisor.DEFAULT_PARAM_ID)));
+            runPromptSetup(baseParamId);
+        }
+
+        if (promptCreate) {
+            String temperature = argValue(argList, "--temperature", "");
+            String seed = argValue(argList, "--seed", "");
+            runPromptCreate(
+                    Long.parseLong(argValue(argList, "--base-param-id",
+                            String.valueOf(GeminiStockAdvisor.DEFAULT_PARAM_ID))),
+                    argValue(argList, "--prompt-version", GeminiPrompts.DEFAULT_VERSION),
+                    temperature.isBlank() ? null : Double.parseDouble(temperature),
+                    seed.isBlank() ? null : Integer.parseInt(seed),
+                    argValue(argList, "--name", ""));
+        }
+
+        if (promptBackfill) {
+            runPromptBackfill(
+                    argValue(argList, "--ticker", "QQQ").toUpperCase(Locale.ROOT),
+                    LocalDate.parse(argValue(argList, "--from", "2026-04-01")),
+                    LocalDate.parse(argValue(argList, "--to", "2026-10-02")),
+                    parseIds(argValue(argList, "--param-ids", argValue(argList, "--param-id", ""))),
+                    argValue(argList, "--model", GeminiConfig.DEFAULT_MODEL));
+        }
+
+        if (promptScore) {
+            String control = argValue(argList, "--control-param-id", "");
+            runPromptScore(
+                    argValue(argList, "--ticker", "QQQ").toUpperCase(Locale.ROOT),
+                    LocalDate.parse(argValue(argList, "--from", "2026-04-01")),
+                    LocalDate.parse(argValue(argList, "--test-from", "2026-07-02")),
+                    LocalDate.parse(argValue(argList, "--to", "2026-10-02")),
+                    parseIds(argValue(argList, "--param-ids", "")),
+                    control.isBlank() ? null : Long.parseLong(control.trim()),
+                    argValue(argList, "--out", null));
+        }
+
+        if (performance || performanceBackfill) {
+            long paramId = Long.parseLong(argValue(argList, "--param-id",
+                    String.valueOf(GeminiStockAdvisor.DEFAULT_PARAM_ID)));
+            boolean recompute = argList.contains("--recompute");
+            runPerformance(
+                    performanceBackfill,
+                    argValue(argList, "--week", null),
+                    Integer.parseInt(argValue(argList, "--weeks", "12")),
+                    paramId,
+                    recompute);
+        }
 
         if (updateRsi) {
             updateRsi14ForWatchlist();
@@ -620,7 +799,9 @@ public class App {
             return;
         }
 
-        if (!runBatch && !backfill && !backtest && !optimize && !updateRsi) {
+        if (!runBatch && !backfill && !backtest && !optimize && !updateRsi
+                && !performance && !performanceBackfill && !promptSetup && !promptCreate
+                && !promptBackfill && !promptScore) {
             System.out.println("Nothing to run. Options:");
             System.out.println("  --batch              refresh Yahoo data + Gemini suggestions");
             System.out.println("      --param-id=1      tuning_params.id (num_date_point → lookback); default 1");
@@ -633,6 +814,20 @@ public class App {
             System.out.println("  --optimize           grid-search strategy params for higher return");
             System.out.println("      --ticker=QQQ --from=2026-01-01 --to=2026-07-17 --cash=10000 --top=15");
             System.out.println("      --param-id=1      suggestions version (tuning_params.id); default 1");
+            System.out.println("  --performance        weekly performance snapshot (latest complete week)");
+            System.out.println("      --week=2026-10-02 --recompute --param-id=1");
+            System.out.println("  --performance-backfill  snapshots for the last N weeks (oldest first)");
+            System.out.println("      --weeks=12 --recompute --param-id=1");
+            System.out.println("  --prompt-setup       create one tuning_params row per prompt version (PROMPT-v1..)");
+            System.out.println("      --base-param-id=1  lookback and weights to copy");
+            System.out.println("  --prompt-create      one tuning_params row for a prompt version + temperature");
+            System.out.println("      --name=PROMPT-v3-s42-a --prompt-version=v3 --seed=42 --temperature=1.0 --base-param-id=1");
+            System.out.println("  --prompt-backfill    Gemini suggestions for days missing a suggestion");
+            System.out.println("      --ticker=QQQ --from=2026-04-01 --to=2026-10-02 --param-ids=4,5");
+            System.out.println("      --model=gemini-3.5-flash-lite  (default " + GeminiConfig.DEFAULT_MODEL + ")");
+            System.out.println("  --prompt-score       compare params: label quality + walk-forward");
+            System.out.println("      --ticker=QQQ --from=2026-04-01 --test-from=2026-07-02 --to=2026-10-02");
+            System.out.println("      --param-ids=1,4,5,6,7,8 --control-param-id=4 --out=prompt-qqq.json");
             System.out.println("  --embedded           start embedded Javalin on port 7070 (dev)");
             System.out.println("  --batch --embedded   batch then start embedded server");
             System.out.println("For Tomcat: mvn -DskipTests package  then copy target/stocksugg.war");

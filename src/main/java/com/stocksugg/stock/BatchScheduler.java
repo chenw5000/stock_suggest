@@ -9,7 +9,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Background monitor: once per day at/after admin {@link RefreshTime#ADMIN_KEY} (Pacific),
- * starts {@link App#startBatchJobAsync()} (Yahoo refresh + Gemini suggestions).
+ * starts {@link App#startBatchJobAsync()} (Yahoo refresh + Gemini suggestions). Once after
+ * startup it also computes the latest weekly performance snapshot if it is missing.
  */
 public final class BatchScheduler implements Runnable {
 
@@ -75,9 +76,14 @@ public final class BatchScheduler implements Runnable {
 
     @Override
     public void run() {
+        boolean performanceCatchUpDone = false;
         while (!stop.get()) {
             try {
                 tick(ZonedDateTime.now(MarketSession.PACIFIC), RefreshTime.loadOrDefault());
+                if (!performanceCatchUpDone && !App.isBatchRunning()) {
+                    performanceCatchUpDone = true;
+                    PerformanceRunner.startLatestIfNeeded(GeminiStockAdvisor.DEFAULT_PARAM_ID);
+                }
                 Thread.sleep(POLL_MILLIS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

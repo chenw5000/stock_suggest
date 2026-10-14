@@ -4,15 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockSugg — suggestion summary</title>
-  <link rel="stylesheet" href="css/suggest.css">
+  <link rel="stylesheet" href="css/suggest.css?v=20261007">
 </head>
 <body>
   <main>
-    <header class="page-header">
-      <div>
-        <h1>Suggestion summary</h1>
+    <header class="page-header summary-header">
+      <h1>Suggestion summary</h1>
+      <div class="summary-header-info">
         <p class="meta" id="meta">Loading…</p>
-        <p class="meta day-summary" id="day-summary" hidden></p>
+        <div class="meta day-summary" id="day-summary" hidden></div>
       </div>
       <form id="date-form" class="date-form" action="suggest-summary.html" method="get">
         <button type="button" id="prev-day" aria-label="Previous day">Previous</button>
@@ -29,8 +29,8 @@
         <tbody id="summary-body"></tbody>
       </table>
     </div>
-    <p class="meta"><a href="index.html">← Home</a> · <a id="detail-link" href="suggest.html">Suggestion details</a> · <a href="history.html">Ticker history</a> · <a href="backtest.html">Backtest</a> · <a href="admin.html">Admin</a></p>
+    <p class="meta"><a href="index.html">← Home</a> · <a id="detail-link" href="suggest.html">Suggestion details</a> · <a href="history.html">Ticker history</a> · <a href="backtest.html">Backtest</a> · <a href="performance.html">Weekly performance</a> · <a href="walkforward.html">Walk-forward</a> · <a href="admin.html">Admin</a></p>
   </main>
-  <script src="js/suggest-summary.js"></script>
+  <script src="js/suggest-summary.js?v=20261007b"></script>
 </body>
 </html>

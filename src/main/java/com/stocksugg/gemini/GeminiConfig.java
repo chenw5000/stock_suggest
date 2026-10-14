@@ -13,7 +13,7 @@ import java.util.Optional;
  */
 public final class GeminiConfig {
 
-    public static final String DEFAULT_MODEL = "gemini-3.5-flash";
+    public static final String DEFAULT_MODEL = "gemini-3.5-flash-lite";
     public static final String ADMIN_API_KEY = "GEMINI_API_KEY";
 
     private final String apiKey;

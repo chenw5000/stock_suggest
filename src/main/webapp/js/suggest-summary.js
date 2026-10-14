@@ -157,26 +157,37 @@
   }
 
   /**
-   * ▲ / ▼ / – comparing the action on isoDate with the previous trading day, ranked
-   * AVOID_HIGH > BUY > HOLD > SELL > AVOID_LOW. Empty when either day is missing or unranked.
+   * Compares the action on isoDate with the previous trading day, ranked
+   * AVOID_HIGH > BUY > HOLD > SELL > AVOID_LOW. Null when either day is missing or unranked.
    */
-  function actionChange(recentActions, isoDate) {
+  function actionDirection(recentActions, isoDate) {
     const entries = recentActions || [];
     const i = entries.findIndex((entry) => entry.date === isoDate);
     if (i <= 0) {
-      return "";
+      return null;
     }
     const prevKey = trendKey(entries[i - 1]);
     const today = ACTION_SCORE[trendKey(entries[i])];
     const prev = ACTION_SCORE[prevKey];
     if (today === undefined || prev === undefined) {
+      return null;
+    }
+    return {
+      direction: today > prev ? "up" : today < prev ? "down" : "same",
+      prevKey: prevKey,
+      prevDate: entries[i - 1].date
+    };
+  }
+
+  /** ▲ / ▼ / – badge for an {@link actionDirection} result; empty when there is none. */
+  function actionChange(change) {
+    if (!change) {
       return "";
     }
-    const direction = today > prev ? "up" : today < prev ? "down" : "same";
-    const sign = direction === "up" ? "▲" : direction === "down" ? "▼" : "–";
-    const title = "Previous (" + entries[i - 1].date + "): " + prevKey;
+    const sign = change.direction === "up" ? "▲" : change.direction === "down" ? "▼" : "–";
+    const title = "Previous (" + change.prevDate + "): " + change.prevKey;
     return (
-      '<span class="action-change ' + direction + '" title="' + escapeHtml(title) + '">' +
+      '<span class="action-change ' + change.direction + '" title="' + escapeHtml(title) + '">' +
       sign + "</span>"
     );
   }
@@ -282,11 +293,15 @@
   }
 
   /**
-   * One-line count of the day's suggestions. AVOID is split by that day's avoidSide
-   * (unclassified AVOID counts as AVOID_LOW, matching the trend chart).
+   * Summary lines for the day: counts per action (AVOID split by that day's avoidSide, with
+   * unclassified AVOID counted as AVOID_LOW to match the trend chart, and the AVOID tickers
+   * listed), then the tickers whose action moved up or down versus the previous trading day.
    */
   function daySummary(rows) {
     const counts = { AVOID_HIGH: 0, BUY: 0, HOLD: 0, SELL: 0, AVOID_LOW: 0 };
+    const listed = { AVOID_HIGH: [], AVOID_LOW: [] };
+    const improved = [];
+    const declined = [];
     let other = 0;
     rows.forEach((row) => {
       let key = row.actionKey;
@@ -295,16 +310,41 @@
       }
       if (key in counts) {
         counts[key]++;
+        if (key in listed) {
+          listed[key].push(row.ticker);
+        }
       } else {
         other++;
       }
+      const direction = row.actionDirection ? row.actionDirection.direction : null;
+      if (direction === "up") {
+        improved.push(row.ticker);
+      } else if (direction === "down") {
+        declined.push(row.ticker);
+      }
     });
     const parts = ["Total: " + rows.length + " stocks"];
-    Object.keys(counts).forEach((key) => parts.push(key + ": " + counts[key]));
+    Object.keys(counts).forEach((key) => {
+      const tickers = listed[key];
+      parts.push(key + ": " + counts[key]
+        + (tickers && tickers.length ? " (" + tickers.join(", ") + ")" : ""));
+    });
     if (other > 0) {
       parts.push("Other: " + other);
     }
-    return parts.join(", ");
+    return [
+      parts.join(", "),
+      "Improved: " + (improved.length ? improved.join(", ") : "none"),
+      "Declined: " + (declined.length ? declined.join(", ") : "none")
+    ];
+  }
+
+  function renderDaySummary(lines) {
+    daySummaryEl.replaceChildren(...lines.map((line) => {
+      const div = document.createElement("div");
+      div.textContent = line;
+      return div;
+    }));
   }
 
   function showError(message) {
@@ -339,9 +379,10 @@
       const rows = data.rows || [];
       rows.forEach((row) => {
         row.actionKey = dayActionKey(row, data.date);
-        row.actionChange = actionChange(row.recentActions, data.date);
+        row.actionDirection = actionDirection(row.recentActions, data.date);
+        row.actionChange = actionChange(row.actionDirection);
       });
-      daySummaryEl.textContent = daySummary(rows);
+      renderDaySummary(daySummary(rows));
       daySummaryEl.hidden = rows.length === 0;
       renderRows(rows);
     })

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockSugg — walk-forward test</title>
+  <link rel="stylesheet" href="css/suggest.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <h1>Walk-forward test</h1>
+        <p class="meta" id="meta">Loading…</p>
+      </div>
+      <div class="perf-controls">
+        <form id="view-form" class="date-form">
+          <label for="run-select">Saved run</label>
+          <select id="run-select" disabled></select>
+        </form>
+        <form id="run-form" class="date-form">
+          <label for="cadence">Re-optimize</label>
+          <select id="cadence">
+            <option value="QUARTERLY">every 3 months</option>
+            <option value="WEEKLY">every week</option>
+          </select>
+          <label for="from">from</label>
+          <input id="from" type="date" title="First day of the simulated (test) span; the first training window is the 3 months before it">
+          <label for="to">to</label>
+          <input id="to" type="date">
+          <label class="backtest-check" for="recompute" title="Search the best strategies again instead of reusing saved ones">
+            <input id="recompute" type="checkbox"> Recompute strategies
+          </label>
+          <button type="submit" id="run-btn">Run</button>
+        </form>
+      </div>
+    </header>
+    <p class="status" id="job-status" hidden></p>
+    <p class="error" id="error" hidden></p>
+
+    <p class="meta wf-explain">
+      Each stock starts with $10,000 at the first test day and keeps one continuous account to the end.
+      At the start of every period the strategy is re-chosen as the best one on the previous 3 months,
+      and the cash and shares held at that moment carry into the period (held shares are re-split into
+      the new strategy's parts). Trades execute at the day's close with no costs.
+      <strong>Fixed</strong> is the untuned all-in strategy (BUY buys all; SELL / AVOID sell all) run over the same span.
+    </p>
+
+    <section id="summary-section" hidden>
+      <p class="meta" id="span-line"></p>
+      <div class="backtest-summary" id="summary"></div>
+      <div class="table-wrap">
+        <table class="wf-table" id="compare-table">
+          <thead>
+            <tr>
+              <th class="left">portfolio</th>
+              <th>ending value</th>
+              <th>return</th>
+              <th>max drawdown</th>
+              <th>time in market</th>
+              <th>trades</th>
+              <th>stocks beating Buy &amp; Hold</th>
+            </tr>
+          </thead>
+          <tbody id="compare-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chart-panel" id="portfolio-panel" hidden>
+      <h2 class="section-title">Portfolio value (sum of all included stocks)</h2>
+      <div class="chart-canvas-box">
+        <canvas id="portfolio-chart"></canvas>
+      </div>
+    </section>
+
+    <section class="backtest-panel wf-detail" id="detail" hidden>
+      <h2 class="section-title" id="detail-title"></h2>
+      <div class="chart-canvas-box">
+        <canvas id="ticker-chart"></canvas>
+      </div>
+      <div class="table-wrap">
+        <table class="wf-table wf-periods">
+          <thead>
+            <tr>
+              <th class="left">test period</th>
+              <th class="left">trained on</th>
+              <th class="left">strategy</th>
+              <th>train return</th>
+              <th>start value</th>
+              <th>end value</th>
+              <th>period return</th>
+              <th>trades</th>
+            </tr>
+          </thead>
+          <tbody id="period-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="table-wrap" id="table-wrap">
+      <p class="empty" id="empty" hidden>No walk-forward run yet.</p>
+      <table id="ticker-table" class="wf-table" hidden>
+        <thead>
+          <tr>
+            <th class="left">ticker</th>
+            <th>buy &amp; hold</th>
+            <th>walk-forward</th>
+            <th>fixed</th>
+            <th>walk-forward − B&amp;H</th>
+            <th>max drawdown (WF / B&amp;H)</th>
+            <th>time in market (WF)</th>
+            <th>trades (WF)</th>
+            <th>beat B&amp;H</th>
+          </tr>
+        </thead>
+        <tbody id="ticker-body"></tbody>
+      </table>
+    </div>
+
+    <p class="meta">
+      <a href="index.html">← Home</a>
+      · <a href="suggest-summary.html">Summary</a>
+      · <a href="history.html">Ticker history</a>
+      · <a href="backtest.html">Backtest</a>
+      · <a href="performance.html">Weekly performance</a>
+      · <a href="admin.html">Admin</a>
+    </p>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+  <script src="js/walkforward.js"></script>
+</body>
+</html>

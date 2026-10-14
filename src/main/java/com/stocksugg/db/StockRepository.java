@@ -742,6 +742,48 @@ public final class StockRepository {
         }
     }
 
+    /** Latest date in {@code stock} (any ticker) within [{@code from}, {@code to}], if any. */
+    public Optional<LocalDate> findLatestDateBetween(LocalDate from, LocalDate to)
+            throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT MAX(\"date\") FROM stock WHERE \"date\" >= ? AND \"date\" <= ?")) {
+            ps.setString(1, from.toString());
+            ps.setString(2, to.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String value = rs.getString(1);
+                    if (value != null && !value.isBlank()) {
+                        return Optional.of(LocalDate.parse(value));
+                    }
+                }
+                return Optional.empty();
+            }
+        }
+    }
+
+    /** Earliest date with a suggestion for {@code paramId}, per ticker (ascending by date). */
+    public List<LocalDate> findFirstLabeledDates(long paramId) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement("""
+                SELECT MIN(s."date") AS first_date FROM stock s
+                JOIN suggestions g ON g.stock_id = s.id AND g.param_id = ?
+                WHERE g.suggestedaction IS NOT NULL
+                GROUP BY s.ticker
+                ORDER BY first_date
+                """)) {
+            ps.setLong(1, paramId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<LocalDate> dates = new ArrayList<>();
+                while (rs.next()) {
+                    String value = rs.getString(1);
+                    if (value != null && !value.isBlank()) {
+                        dates.add(LocalDate.parse(value));
+                    }
+                }
+                return dates;
+            }
+        }
+    }
+
     /**
      * Nearest calendar date in {@code stock} strictly before ({@code direction < 0})
      * or after ({@code direction > 0}) {@code from}. Skips weekends/holidays with no rows.

@@ -33,71 +33,6 @@ public final class GeminiStockAdvisor {
     /** Default {@code tuning_params.id} when callers omit one (baseline lookback 40). */
     public static final long DEFAULT_PARAM_ID = 1L;
 
-    /** Canonical meanings for the action field (long-position framing only). */
-    private static final String ACTION_DEFINITIONS = """
-            Set action to exactly one of BUY, HOLD, SELL, AVOID, or NA (insufficient data only).
-            Use long-position framing only — do not recommend opening a short.
-            - BUY: Favorable setup to enter or add a long position. Bullish trend, momentum,
-              volume, and/or candlestick structure with acceptable risk/reward over
-              horizonTradingDays. entryPriceRange and profitTakingPriceRange should support
-              a new or increased long.
-            - HOLD: No new trade. Signals are mixed, range-bound, or inconclusive. If already
-              long, no strong reason to add or exit; wait for confirmation. Do not use HOLD
-              when a clear entry or exit case exists.
-            - SELL: Favor exiting or reducing an existing long. Bearish trend, breakdown,
-              weakening momentum/volume, or bearish patterns suggest downside risk over
-              horizonTradingDays. cutlossPriceRange / profitTakingPriceRange should reflect
-              exit or de-risking, not a new long entry.
-            - AVOID: Do not initiate a new long. Setup is unclear, choppy, or poor
-              risk/reward — worse than HOLD for someone considering entry. Use when
-              staying flat (no new position) is the best call even if an existing holder
-              might HOLD.
-            - NA: Use only when supplied data is insufficient to analyze that package.
-            After writing thesis and risks, pick the single best-fitting action label.
-            """;
-
-            // NOTE: Extreme condition: HOLD means TRAIL STOP / HOLD.
-            // NOTE: Extreme condition: AVOID means TAKE PROFIT / AVOID.
-    public static final String SYSTEM_INSTRUCTION = """
-            Use only provided OHLCV/indicators. No invented quotes. Return JSON schema.
-
-            If data is insufficient for a package, action=NA and explain for that package.
-            Price ranges must be grounded in the supplied prices/levels (entryPriceRange,
-            cutlossPriceRange, profitTakingPriceRange). confidence is 0.0-1.0.
-
-            When multiple stock packages are provided, return exactly one suggestion object
-            per package in the suggestions array. Each package has ticker + asOf — copy that
-            asOf into the suggestion, keep packages independent, and do not use later data.
-            When the package includes indicatorWeights, honor them: 0 means ignore that
-            indicator; higher weight means give it more influence on thesis and action.
-            Weights are relative priorities, not numeric multipliers of prices.
-
-            CRITICAL EXHAUSTION FILTER: If the final rows of the 20-day data payload exhibit 
-            extreme terminal oversold parameters (specifically: CMO below -50, RSI below 20, 
-            and CMF below -0.20), you must classify this as a "Capitulation Exhaustion Zone." 
-            In this state, do not issue a Continuation Downward / Sell recommendation. 
-            Instead, categorize the asset as "Awaiting Reversal Confirmation." 
-            You are only permitted to issue a BUY suggestion if the final candlestick row 
-            demonstrates a positive closing price return backed by above-average daily volume.
-
-            CRITICAL PARABOLIC EXHAUSTION FILTER: You must evaluate if the stock has decoupled 
-            from its moving average structure. If the final rows of the 20-day data payload 
-            exhibit extreme upper boundary readings (specifically: CMO above +50, RSI above 80, 
-            and the Close price is stretched more than 15% above the 20MA), 
-            you must classify this as a "Parabolic Blow-off Top Danger Zone." 
-
-            In this state, you are STRICTLY FORBIDDEN from issuing a "Buy" or "Strong Buy" 
-            recommendation, regardless of how strong the upward trajectory looks. 
-            Instead, your output must prioritize Capital Preservation:
-            1. If the current Close price is still above the MA5, issue a "HOLD" 
-               stance, advising the user to protect open profits.
-            2. If the current Close price has crossed and closed below the MA5, or if a clear 
-               Bearish Divergence is visible (Price making higher highs while RSI/CMO make 
-               lower highs over the 20-day window), you must issue an "AVOID" 
-               stance, signaling a definitive near-term trend breakdown.
-
-            """ + ACTION_DEFINITIONS;
-
     private final StockRepository repository;
     private final TuningParamsRepository tuningParamsRepository;
     private final SuggestionsRepository suggestionsRepository;
@@ -332,12 +267,15 @@ public final class GeminiStockAdvisor {
         List<List<StockRow>> barLists = snapshots.stream().map(AdviceSnapshot::bars).toList();
         Map<String, Object> payload =
                 StockSummaryBuilder.buildMultiSnapshotPackage(barLists, horizonTradingDays);
+        GeminiPrompts.Prompt prompt = GeminiPrompts.forVersion(GeminiPrompts.DEFAULT_VERSION);
+        Float temperature = null;
+        Integer seed = null;
         if (paramId != null) {
             TuningParams params = requireTuningParams(paramId);
-            payload.put("paramId", params.id());
-            if (params.name() != null && !params.name().isBlank()) {
-                payload.put("paramName", params.name());
-            }
+            prompt = GeminiPrompts.forVersion(params.promptVersionOrDefault());
+            temperature = params.temperatureOrNull();
+            seed = params.seed();
+            // No param id or name in the package: repeat runs of one prompt must send identical input.
             payload.put("indicatorWeights", params.indicatorWeights());
             payload.put("weightMeaning", TuningParams.WEIGHT_MEANING);
         }
@@ -349,50 +287,23 @@ public final class GeminiStockAdvisor {
             asOfList.add(snapshot.asOf().toString());
         }
 
-        String userPrompt = """
-                Analyze this multi-stock market package and return one suggestion per stock package.
-
-                in the response 'thesis', include the following information:
-                - INDICATOR ANALYSIS: base this on the passed-in moving averages and indicators,
-                  emphasizing those with higher indicatorWeights (0 = ignore that series).
-                - TREND CONTEXT: Identify the prevailing short-term and medium-term trend context leading into the final 5 candlesticks.
-                - K-LINE RECOGNITION: Scan the most recent 1 to 5 candlesticks. Identify any specific price-action candlestick patterns (e.g., Doji, Hammer, Bullish/Bearish Engulfing, Marubozu, Harami, Piercing Line, or multi-bar reversal/continuation structures).
-                - VOLUME VALIDATION: Analyze whether the volume on the pattern bars confirms the move (e.g., expanding volume on breakout/reversal bars, or drying volume on pullbacks).
-                - TRADING SUGGESTIONS: Based strictly on the identified K-line setup and structural context, provide an actionable execution table with:
-                   - Aggressive Entry Zone
-                   - Conservative Entry Zone
-                   - Stop Loss Zone
-                   - Profit Taking Zone
-                   - Time Frame
-                   - Potential Opportunities
-                   - Potential Risks
-                   - Potential Rewards
-                - Summarize and provide a final recommendation based on the analysis.
-                - EXTREME CONDITION NOTE: If the final rows trigger either the Capitulation Exhaustion Zone \
-(CMO < -50, RSI < 20, CMF < -0.20) or the Parabolic Blow-off Top Danger Zone \
-(CMO > +50, RSI > 80, Close > 15% above 20MA), explicitly state which extreme condition was detected \
-at the start of the thesis, including the actual indicator values that triggered it.
-
-                Based on the thesis and risks, set action using these definitions:
-                """ + ACTION_DEFINITIONS + """
-
-                You MUST return exactly %d suggestion(s), one for each asOf date: %s.
-                Each package has its own ticker and asOf date — treat that asOf as the decision date
-                (do not use later information), and return the same asOf in each suggestion.
-                Do not omit any asOf date from the list.
-                Package:
-                %s
-                """.formatted(
+        String userPrompt = prompt.userPrompt(
                 snapshots.size(),
                 String.join(", ", asOfList),
                 objectMapper.writeValueAsString(payload));
 
-        GenerateContentConfig config = GenerateContentConfig.builder()
-                .systemInstruction(Content.fromParts(Part.fromText(SYSTEM_INSTRUCTION)))
+        GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
+                .systemInstruction(Content.fromParts(Part.fromText(prompt.systemInstruction())))
                 .responseMimeType("application/json")
                 .responseSchema(batchSuggestionSchema())
-                .candidateCount(1)
-                .build();
+                .candidateCount(1);
+        if (temperature != null) {
+            configBuilder.temperature(temperature);
+        }
+        if (seed != null) {
+            configBuilder.seed(seed);
+        }
+        GenerateContentConfig config = configBuilder.build();
 
         String json = gemini.generateText(userPrompt, config);
         GeminiSuggestionBatch batch = objectMapper.readValue(json, GeminiSuggestionBatch.class);

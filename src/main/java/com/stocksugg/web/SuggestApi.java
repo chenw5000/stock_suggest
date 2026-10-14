@@ -42,6 +42,9 @@ public final class SuggestApi {
                 }
                 item.put("name", name);
                 item.put("numDatePoint", row.numDatePoint());
+                item.put("promptVersion", row.promptVersionOrDefault());
+                item.put("temperature", row.temperature());
+                item.put("seed", row.seed());
                 params.add(item);
             }
             Map<String, Object> body = new LinkedHashMap<>();
