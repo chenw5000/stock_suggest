@@ -67,6 +67,23 @@
     });
   }
 
+  function formatVolume(value) {
+    if (value == null || Number.isNaN(value)) {
+      return "—";
+    }
+    const n = Number(value);
+    if (n >= 1_000_000_000) {
+      return (n / 1_000_000_000).toFixed(2) + "B";
+    }
+    if (n >= 1_000_000) {
+      return (n / 1_000_000).toFixed(2) + "M";
+    }
+    if (n >= 1_000) {
+      return (n / 1_000).toFixed(1) + "K";
+    }
+    return String(Math.round(n));
+  }
+
   function formatChangeCell(change, changePct) {
     if (change == null || Number.isNaN(change)) {
       return "<td>—</td>";
@@ -348,26 +365,35 @@
     }
     chartWrap.hidden = false;
     chartTitle.textContent =
-      data.ticker + " HLOC — last " + CHART_MONTHS + " months";
+      data.ticker + " HLOC + volume — last " + CHART_MONTHS + " months";
 
     const styles = getComputedStyle(document.documentElement);
     const muted = styles.getPropertyValue("--muted").trim() || "#8b98a5";
     const line = styles.getPropertyValue("--line").trim() || "#2a3542";
     const upColor = "#2eb872";
     const downColor = "#e05252";
+    const volumeUp = "rgba(46, 184, 114, 0.45)";
+    const volumeDown = "rgba(224, 82, 82, 0.45)";
 
     const candleColors = points.map((p) =>
       p.close >= p.open ? upColor : downColor
     );
+    const volumeColors = points.map((p) =>
+      p.close >= p.open ? volumeUp : volumeDown
+    );
+    const volumes = points.map((p) =>
+      p.volume == null || Number.isNaN(Number(p.volume)) ? 0 : Number(p.volume)
+    );
 
     const highest = Math.max(...points.map((p) => p.high));
     const lowest = Math.min(...points.map((p) => p.low));
+    const maxVolume = Math.max(0, ...volumes);
 
     if (priceChart) {
       priceChart.destroy();
     }
-    // Candlesticks from two overlapping floating-bar datasets:
-    // a thin high-low wick behind a thick open-close body.
+    // Candlesticks from two overlapping floating-bar datasets on the price axis,
+    // plus volume bars on a stacked lower axis in the same canvas.
     priceChart = new Chart(chartCanvas, {
       type: "bar",
       data: {
@@ -377,6 +403,7 @@
             label: "wick",
             data: points.map((p) => [p.low, p.high]),
             backgroundColor: candleColors,
+            yAxisID: "y",
             grouped: false,
             barPercentage: 0.16,
             categoryPercentage: 1.0,
@@ -386,12 +413,23 @@
             label: "body",
             data: points.map((p) => [p.open, p.close]),
             backgroundColor: candleColors,
+            yAxisID: "y",
             grouped: false,
             barPercentage: 0.72,
             categoryPercentage: 1.0,
             // Doji days (open == close) would otherwise render as invisible bars.
             minBarLength: 2,
             order: 1
+          },
+          {
+            label: "volume",
+            data: volumes,
+            backgroundColor: volumeColors,
+            yAxisID: "yVolume",
+            grouped: false,
+            barPercentage: 0.85,
+            categoryPercentage: 1.0,
+            order: 3
           }
         ]
       },
@@ -402,7 +440,7 @@
         plugins: {
           legend: { display: false },
           tooltip: {
-            filter: (item) => item.datasetIndex === 1,
+            filter: (item) => item.dataset.label === "body",
             callbacks: {
               label: (ctx) => {
                 const p = points[ctx.dataIndex];
@@ -410,7 +448,8 @@
                   "Open:  " + formatNum(p.open),
                   "High:  " + formatNum(p.high),
                   "Low:   " + formatNum(p.low),
-                  "Close: " + formatNum(p.close)
+                  "Close: " + formatNum(p.close),
+                  "Vol:   " + formatVolume(p.volume)
                 ];
               }
             }
@@ -425,7 +464,34 @@
             },
             grid: { display: false }
           },
+          // Chart.js stacks later axes above earlier ones — define volume first
+          // so the price pane sits on top and volume stays at the bottom.
+          yVolume: {
+            type: "linear",
+            position: "left",
+            stack: "history",
+            stackWeight: 1,
+            min: 0,
+            max: maxVolume > 0 ? maxVolume * 1.15 : 1,
+            border: { display: false },
+            title: {
+              display: true,
+              text: "Vol",
+              color: muted,
+              font: { size: 10 }
+            },
+            ticks: {
+              color: muted,
+              maxTicksLimit: 3,
+              callback: (value) => formatVolume(value)
+            },
+            grid: { color: line }
+          },
           y: {
+            type: "linear",
+            position: "left",
+            stack: "history",
+            stackWeight: 3,
             min: lowest * 0.9,
             max: highest * 1.1,
             ticks: {

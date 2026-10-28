@@ -85,6 +85,9 @@ public final class StockSummaryBuilder {
         StockRow latest = barsOldestFirst.getLast();
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("close", latest.close());
+        summary.put("volume", latest.volume());
+        summary.put("vol20", latest.vol20());
+        summary.put("volumeVsVol20Pct", volumeVsVol20Pct(latest.volume(), latest.vol20()));
         summary.put("ma5", latest.ma5());
         summary.put("ma10", latest.ma10());
         summary.put("ma20", latest.ma20());
@@ -111,6 +114,9 @@ public final class StockSummaryBuilder {
             bar.put("high", row.high());
             bar.put("low", row.low());
             bar.put("close", row.close());
+            bar.put("volume", row.volume());
+            bar.put("vol20", row.vol20());
+            bar.put("volumeVsVol20Pct", volumeVsVol20Pct(row.volume(), row.vol20()));
             bar.put("ma5", row.ma5());
             bar.put("ma10", row.ma10());
             bar.put("ma20", row.ma20());
@@ -129,6 +135,17 @@ public final class StockSummaryBuilder {
             return null;
         }
         return ((value - baseline) / baseline) * 100f;
+    }
+
+    /**
+     * Percent by which that day's volume exceeds (or trails) its 20-session average.
+     * Positive = above-average volume.
+     */
+    static Float volumeVsVol20Pct(Long volume, Double vol20) {
+        if (volume == null || vol20 == null || vol20 == 0.0) {
+            return null;
+        }
+        return (float) ((volume - vol20) / vol20 * 100.0);
     }
 
     private static Float periodReturnPct(List<StockRow> bars, int lookback) {

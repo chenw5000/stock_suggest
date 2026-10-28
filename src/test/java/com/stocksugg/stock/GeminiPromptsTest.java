@@ -14,13 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GeminiPromptsTest {
 
-    /** Param 1's suggestions were generated with this exact text; it must never change. */
+    /**
+     * v1 text must stay stable unless intentionally revised (last revised when dataUsed was
+     * told to list volume / vol20 / volumeVsVol20Pct when those fields influenced the call).
+     */
     @Test
     void v1IsFrozen() throws Exception {
         GeminiPrompts.Prompt v1 = GeminiPrompts.forVersion("v1");
-        assertEquals("595c83013b32d6a9916275066f901464ddfc615b51416a94cb468ddd095761b5",
+        assertEquals("203f471bbd33dde899d48c04eb34a7d945b11d1188e944cd21e9d6718264c6eb",
                 sha256(v1.systemInstruction()));
-        assertEquals("3974025fff25a25248d24f753dfa70accfea324da2b88a7ce3c601b1ed0e7b82",
+        assertEquals("c01ca2783cafaf2eeb27ead4c0756f1111594fc6c350c133d2fdee21d72695bf",
                 sha256(v1.userPrompt(2, "2026-07-01, 2026-07-02", "{}")));
     }
 

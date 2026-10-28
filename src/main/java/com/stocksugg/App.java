@@ -5,6 +5,9 @@ import com.stocksugg.db.StockRepository;
 import com.stocksugg.db.StrategyOptimizeRepository;
 import com.stocksugg.gemini.GeminiConfig;
 import com.stocksugg.gemini.GeminiService;
+import com.stocksugg.insider.InsiderImpactClient;
+import com.stocksugg.insider.InsiderImpactResult;
+import com.stocksugg.insider.InsiderImpactService;
 import com.stocksugg.stock.BacktestDay;
 import com.stocksugg.stock.GeminiPrompts;
 import com.stocksugg.stock.GeminiStockAdvisor;
@@ -14,11 +17,9 @@ import com.stocksugg.stock.PerformanceRunner;
 import com.stocksugg.stock.PerformanceWeek;
 import com.stocksugg.stock.PromptExperiment;
 import com.stocksugg.stock.StockDataImporter;
-import com.stocksugg.stock.StockRow;
 import com.stocksugg.stock.StrategyOptimize;
 import com.stocksugg.stock.SuggestionBacktester;
 import com.stocksugg.stock.SuggestionStrategyOptimizer;
-import com.stocksugg.stock.TechnicalIndicators;
 import com.stocksugg.stock.TickerList;
 import com.stocksugg.stock.TuningParams;
 import com.stocksugg.web.WebServer;
@@ -27,7 +28,6 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -286,61 +286,6 @@ public class App {
         adviseStocks(tickers, paramId);
     }
 
-    /**
-     * Recalculates Wilder RSI(14) from all stored closes for every ticker in the admin watchlist.
-     * Only the {@code rsi14} column is updated; OHLCV and suggestion fields are left unchanged.
-     */
-    public static void updateRsi14ForWatchlist() {
-        List<String> tickers = TickerList.loadFromAdmin();
-        System.out.println("Updating RSI(14) for watchlist: " + tickers);
-
-        try (Database db = new Database()) {
-            StockRepository repository = new StockRepository(db);
-            int totalUpdated = 0;
-
-            for (String ticker : tickers) {
-                try {
-                    List<StockRow> rows = repository.findAllBars(ticker);
-                    if (rows.isEmpty()) {
-                        System.out.println(ticker + ": no stored rows; skipped.");
-                        continue;
-                    }
-
-                    double[] closes = new double[rows.size()];
-                    for (int i = 0; i < rows.size(); i++) {
-                        closes[i] = rows.get(i).close();
-                    }
-                    Float[] values = TechnicalIndicators.relativeStrengthIndex(
-                            closes, TechnicalIndicators.RSI_PERIOD);
-
-                    Map<LocalDate, Float> valuesByDate = new LinkedHashMap<>();
-                    int populated = 0;
-                    for (int i = 0; i < rows.size(); i++) {
-                        valuesByDate.put(rows.get(i).date(), values[i]);
-                        if (values[i] != null) {
-                            populated++;
-                        }
-                    }
-
-                    int updated = repository.updateRsi14(ticker, valuesByDate);
-                    totalUpdated += updated;
-                    System.out.println(ticker + ": updated " + updated + " row(s); "
-                            + populated + " RSI value(s), "
-                            + (rows.size() - populated) + " warm-up null(s).");
-                } catch (Exception e) {
-                    System.err.println(ticker + ": RSI update failed: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-
-            System.out.println("RSI(14) watchlist update complete: "
-                    + totalUpdated + " row(s) updated.");
-        } catch (Exception e) {
-            System.err.println("RSI watchlist update failed: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
     private static void runBacktest(
             String ticker,
             LocalDate from,
@@ -574,6 +519,65 @@ public class App {
                 label, result.endingEquity(), result.returnPct());
     }
 
+    /**
+     * Downloads Yahoo volume for each watchlist ticker (or one {@code --ticker}), computes
+     * {@code vol20}, and updates those columns on existing stock rows.
+     */
+    private static void runUpdateVolume(String tickerOrNull) {
+        List<String> tickers = tickerOrNull == null || tickerOrNull.isBlank()
+                ? TickerList.loadFromAdmin()
+                : List.of(tickerOrNull.trim().toUpperCase(Locale.ROOT));
+        System.out.println("Updating volume + vol20 for: " + tickers);
+        int total = 0;
+        try (Database db = new Database()) {
+            StockDataImporter importer = new StockDataImporter(db);
+            for (String ticker : tickers) {
+                try {
+                    total += importer.updateVolumeAndVol20(ticker);
+                } catch (Exception e) {
+                    System.err.println(ticker + ": volume update failed: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+            System.out.println("Volume/vol20 update complete: " + total + " row(s) updated.");
+        } catch (Exception e) {
+            System.err.println("Volume update failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Loads {@link InsiderImpactService#REQUIRED_BARS} OHLCV bars ending on {@code asOf} and
+     * posts them to the local insiderTrans impact API.
+     */
+    private static void runInsiderImpact(String ticker, LocalDate asOf, String baseUrl) {
+        try (Database db = new Database();
+             InsiderImpactClient client = new InsiderImpactClient(baseUrl)) {
+            InsiderImpactService service = new InsiderImpactService(
+                    new StockRepository(db), client, new com.stocksugg.yahoo.YahooFinanceClient());
+            System.out.println("Insider impact " + ticker + " asOf=" + asOf
+                    + " via " + client.impactUri()
+                    + " (" + InsiderImpactService.REQUIRED_BARS + " bars)…");
+            InsiderImpactResult result = service.evaluate(ticker, asOf);
+            System.out.printf(Locale.US,
+                    "flowLabel=%s  flowScore=%s  trend=%s  filingsFound=%s  barCountUsed=%s  scoredTrades=%s%n",
+                    result.flowLabel(),
+                    result.flowScore() == null ? "—" : String.format(Locale.US, "%+.4f", result.flowScore()),
+                    result.trend(),
+                    result.filingsFound(),
+                    result.barCountUsed(),
+                    result.scoredTradeCount());
+            if (result.caveat() != null && !result.caveat().isBlank()) {
+                System.out.println("caveat: " + result.caveat());
+            }
+            System.out.println(client.mapper().writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(result.raw()));
+        } catch (Exception e) {
+            System.err.println("Insider impact failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     private static void runPromptSetup(long baseParamId) {
         try (Database db = new Database()) {
             Map<String, TuningParams> rows = PromptExperiment.setup(db, baseParamId);
@@ -693,13 +697,14 @@ public class App {
         boolean backfill = argList.contains("--backfill");
         boolean backtest = argList.contains("--backtest");
         boolean optimize = argList.contains("--optimize");
-        boolean updateRsi = argList.contains("--update-rsi");
+        boolean updateVolume = argList.contains("--update-volume");
         boolean performance = argList.contains("--performance");
         boolean performanceBackfill = argList.contains("--performance-backfill");
         boolean promptSetup = argList.contains("--prompt-setup");
         boolean promptCreate = argList.contains("--prompt-create");
         boolean promptBackfill = argList.contains("--prompt-backfill");
         boolean promptScore = argList.contains("--prompt-score");
+        boolean insiderImpact = argList.contains("--insider-impact");
 
         if (promptSetup) {
             long baseParamId = Long.parseLong(argValue(argList, "--base-param-id",
@@ -740,6 +745,13 @@ public class App {
                     argValue(argList, "--out", null));
         }
 
+        if (insiderImpact) {
+            runInsiderImpact(
+                    argValue(argList, "--ticker", "AAPL").toUpperCase(Locale.ROOT),
+                    LocalDate.parse(argValue(argList, "--as-of", argValue(argList, "--date", "2026-10-02"))),
+                    argValue(argList, "--insider-url", InsiderImpactClient.DEFAULT_BASE_URL));
+        }
+
         if (performance || performanceBackfill) {
             long paramId = Long.parseLong(argValue(argList, "--param-id",
                     String.valueOf(GeminiStockAdvisor.DEFAULT_PARAM_ID)));
@@ -752,8 +764,10 @@ public class App {
                     recompute);
         }
 
-        if (updateRsi) {
-            updateRsi14ForWatchlist();
+        if (updateVolume) {
+            // Empty --ticker= means the whole admin watchlist.
+            String ticker = argValue(argList, "--ticker", "");
+            runUpdateVolume(ticker.isBlank() ? null : ticker);
         }
 
         if (backfill) {
@@ -799,13 +813,14 @@ public class App {
             return;
         }
 
-        if (!runBatch && !backfill && !backtest && !optimize && !updateRsi
+        if (!runBatch && !backfill && !backtest && !optimize && !updateVolume
                 && !performance && !performanceBackfill && !promptSetup && !promptCreate
-                && !promptBackfill && !promptScore) {
+                && !promptBackfill && !promptScore && !insiderImpact) {
             System.out.println("Nothing to run. Options:");
             System.out.println("  --batch              refresh Yahoo data + Gemini suggestions");
             System.out.println("      --param-id=1      tuning_params.id (num_date_point → lookback); default 1");
-            System.out.println("  --update-rsi         recalculate RSI(14) for all watchlist tickers");
+            System.out.println("  --update-volume      download Yahoo volume and compute vol20 on existing rows");
+            System.out.println("      --ticker=AAPL     one ticker; omit for the whole admin watchlist");
             System.out.println("  --backfill           Gemini backfill for historical days");
             System.out.println("      --ticker=AAPL --from=2026-07-01 --to=2026-07-14 --param-id=1");
             System.out.println("  --backtest           suggestion-driven long-only backtest");
@@ -828,6 +843,9 @@ public class App {
             System.out.println("  --prompt-score       compare params: label quality + walk-forward");
             System.out.println("      --ticker=QQQ --from=2026-04-01 --test-from=2026-07-02 --to=2026-10-02");
             System.out.println("      --param-ids=1,4,5,6,7,8 --control-param-id=4 --out=prompt-qqq.json");
+            System.out.println("  --insider-impact     call local insiderTrans /api/impact for one ticker/date");
+            System.out.println("      --ticker=AAPL --as-of=2026-10-02");
+            System.out.println("      --insider-url=http://localhost:6060  (default)");
             System.out.println("  --embedded           start embedded Javalin on port 7070 (dev)");
             System.out.println("  --batch --embedded   batch then start embedded server");
             System.out.println("For Tomcat: mvn -DskipTests package  then copy target/stocksugg.war");

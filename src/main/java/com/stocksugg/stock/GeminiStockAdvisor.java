@@ -491,7 +491,15 @@ public final class GeminiStockAdvisor {
                         Map.entry("keyLevels", keyLevels),
                         Map.entry("risks", stringArray),
                         Map.entry("invalidation", Schema.builder().type(Type.Known.STRING).build()),
-                        Map.entry("dataUsed", stringArray)))
+                        Map.entry("dataUsed", Schema.builder()
+                                .type(Type.Known.ARRAY)
+                                .description(
+                                        "Package field names that influenced the suggestion "
+                                                + "(e.g. ma20, rsi14). Include volume, vol20, "
+                                                + "and/or volumeVsVol20Pct when volume confirmation "
+                                                + "was used.")
+                                .items(Schema.builder().type(Type.Known.STRING).build())
+                                .build())))
                 .required(List.of(
                         "ticker", "asOf", "action", "confidence",
                         "entryPriceRange", "cutlossPriceRange", "profitTakingPriceRange",

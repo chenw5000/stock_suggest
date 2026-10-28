@@ -64,4 +64,26 @@ class TechnicalIndicatorsTest {
         assertNotNull(rows.get(4).ma5());
         assertEquals(12f, rows.get(4).ma5(), 0.001f);
     }
+
+    @Test
+    void enrichComputesTwentyDayAverageVolume() {
+        List<StockBar> bars = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            bars.add(new StockBar(
+                    "TEST",
+                    LocalDate.of(2024, 1, 1).plusDays(i),
+                    10, 11, 9, 10,
+                    1_000_000L + i * 10_000L));
+        }
+
+        List<StockRow> rows = TechnicalIndicators.enrich(bars);
+
+        assertNull(rows.get(18).vol20());
+        assertNotNull(rows.get(19).vol20());
+        // days 0..19: volumes 1_000_000, 1_010_000, ... 1_190_000 → avg = 1_095_000
+        assertEquals(1_095_000.0, rows.get(19).vol20(), 0.001);
+        // days 5..24: 1_050_000 .. 1_240_000 → avg = 1_145_000
+        assertEquals(1_145_000.0, rows.get(24).vol20(), 0.001);
+        assertEquals(1_000_000L + 24 * 10_000L, rows.get(24).volume());
+    }
 }

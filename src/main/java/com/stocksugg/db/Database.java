@@ -95,6 +95,8 @@ public final class Database implements AutoCloseable {
                 )
                 """);
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS rsi14 REAL");
+        stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS volume BIGINT");
+        stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS vol20 DOUBLE PRECISION");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedaction VARCHAR(16)");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS confidence REAL");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedstopprice REAL");
@@ -142,6 +144,8 @@ public final class Database implements AutoCloseable {
                 )
                 """);
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS rsi14 FLOAT");
+        stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS volume BIGINT");
+        stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS vol20 DOUBLE PRECISION");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedAction VARCHAR(16)");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS confidence FLOAT");
         stmt.execute("ALTER TABLE stock ADD COLUMN IF NOT EXISTS suggestedStopPrice FLOAT");

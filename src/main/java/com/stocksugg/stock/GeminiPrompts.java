@@ -54,6 +54,24 @@ public final class GeminiPrompts {
 
     // NOTE: Extreme condition: HOLD means TRAIL STOP / HOLD.
     // NOTE: Extreme condition: AVOID means TAKE PROFIT / AVOID.
+    private static final String VOLUME_FIELD_DOCS = """
+            VOLUME FIELDS (present on each bar and on latest when available):
+            - volume: that session's share volume from the exchange feed.
+            - vol20: simple average of volume over the last 20 sessions ending on that bar
+              (null until 20 sessions exist — do not invent a substitute).
+            - volumeVsVol20Pct: (volume - vol20) / vol20 * 100. Positive means that day's
+              volume is above the recent 20-day average; negative means below. When the rules
+              below say "above-average volume", use volumeVsVol20Pct > 0 when both volume and
+              vol20 are present; if either is null, say volume confirmation is unavailable.
+
+            dataUsed: List the package field names that materially influenced this suggestion
+            (e.g. ma20, rsi14, chalkinMF). When volume confirmation or volumeVsVol20Pct
+            affected thesis or action, include volume, vol20, and/or volumeVsVol20Pct in
+            dataUsed — do not omit them merely because moving averages or oscillators were
+            also used. If volume fields were null/unavailable, omit them and note that in
+            thesis instead.
+            """;
+
     private static final String V1_SYSTEM_INSTRUCTION = """
             Use only provided OHLCV/indicators. No invented quotes. Return JSON schema.
 
@@ -68,13 +86,15 @@ public final class GeminiPrompts {
             indicator; higher weight means give it more influence on thesis and action.
             Weights are relative priorities, not numeric multipliers of prices.
 
+            """ + VOLUME_FIELD_DOCS + """
             CRITICAL EXHAUSTION FILTER: If the final rows of the 20-day data payload exhibit 
             extreme terminal oversold parameters (specifically: CMO below -50, RSI below 20, 
             and CMF below -0.20), you must classify this as a "Capitulation Exhaustion Zone." 
             In this state, do not issue a Continuation Downward / Sell recommendation. 
             Instead, categorize the asset as "Awaiting Reversal Confirmation." 
             You are only permitted to issue a BUY suggestion if the final candlestick row 
-            demonstrates a positive closing price return backed by above-average daily volume.
+            demonstrates a positive closing price return backed by above-average daily volume
+            (volumeVsVol20Pct > 0 when volume and vol20 are present).
 
             CRITICAL PARABOLIC EXHAUSTION FILTER: You must evaluate if the stock has decoupled 
             from its moving average structure. If the final rows of the 20-day data payload 
@@ -104,7 +124,7 @@ public final class GeminiPrompts {
                   emphasizing those with higher indicatorWeights (0 = ignore that series).
                 - TREND CONTEXT: Identify the prevailing short-term and medium-term trend context leading into the final 5 candlesticks.
                 - K-LINE RECOGNITION: Scan the most recent 1 to 5 candlesticks. Identify any specific price-action candlestick patterns (e.g., Doji, Hammer, Bullish/Bearish Engulfing, Marubozu, Harami, Piercing Line, or multi-bar reversal/continuation structures).
-                - VOLUME VALIDATION: Analyze whether the volume on the pattern bars confirms the move (e.g., expanding volume on breakout/reversal bars, or drying volume on pullbacks).
+                - VOLUME VALIDATION: Use volume, vol20, and volumeVsVol20Pct from the package. Say whether pattern bars are above or below the 20-day average (volumeVsVol20Pct), and whether volume confirms the move (e.g., expanding on breakout/reversal bars, drying on pullbacks).
                 - TRADING SUGGESTIONS: Based strictly on the identified K-line setup and structural context, provide an actionable execution table with:
                    - Aggressive Entry Zone
                    - Conservative Entry Zone
@@ -149,6 +169,7 @@ at the start of the thesis, including the actual indicator values that triggered
             indicator; higher weight means give it more influence on thesis and action.
             Weights are relative priorities, not numeric multipliers of prices.
 
+            """ + VOLUME_FIELD_DOCS + """
             LABEL VOCABULARY: action must be exactly one of BUY, HOLD, SELL, AVOID, NA. Never put
             any other wording (such as "Strong Buy", "Awaiting Reversal", "Trail Stop" or
             "Take Profit") in action; describe such nuances in thesis only.
@@ -160,8 +181,8 @@ at the start of the thesis, including the actual indicator values that triggered
     private static final String V2_SYSTEM_INSTRUCTION = BASE_RULES + """
             CAPITULATION FILTER: If the final rows show CMO below -50, RSI below 20 and CMF below
             -0.20 (capitulation exhaustion), never output SELL. Output BUY only if the final bar
-            closed higher than the previous close on above-average volume; otherwise output HOLD
-            (wait for reversal confirmation).
+            closed higher than the previous close on above-average volume (volumeVsVol20Pct > 0
+            when volume and vol20 are present); otherwise output HOLD (wait for reversal confirmation).
 
             PARABOLIC FILTER: If the final rows show CMO above +50, RSI above 80 and Close more
             than 15% above MA20 (parabolic blow-off), never output BUY. Output HOLD while Close

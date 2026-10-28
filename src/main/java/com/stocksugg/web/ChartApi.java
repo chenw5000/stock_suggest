@@ -45,6 +45,7 @@ public final class ChartApi {
                 point.put("high", bar.high());
                 point.put("low", bar.low());
                 point.put("close", bar.close());
+                point.put("volume", bar.volume());
                 points.add(point);
             }
 

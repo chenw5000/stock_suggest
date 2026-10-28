@@ -26,13 +26,13 @@ class DatabaseTest {
 
             assertTrue(columns.containsAll(Set.of(
                     "id", "ticker", "date",
-                    "open", "high", "low", "close",
+                    "open", "high", "low", "close", "volume", "vol20",
                     "ma5", "ma10", "ma20", "ma50", "ma200",
                     "rsi14", "chandemmt", "chalkinmf",
                     "suggestedaction", "confidence",
                     "suggestedstopprice", "suggestedentryprice", "suggestedprofitprice",
                     "thesis", "risks")));
-            assertEquals(22, columns.size());
+            assertEquals(24, columns.size());
         }
     }
 

@@ -22,7 +22,9 @@ class StockSummaryBuilderTest {
                     LocalDate.of(2026, 7, 1).plusDays(i),
                     close, close + 1, close - 1, close,
                     close, close, 100f, 95f, 90f,
-                    55f, 10f, 0.1f));
+                    55f, 10f, 0.1f,
+                    1_200_000L + i * 10_000L,
+                    1_000_000.0));
         }
 
         Map<String, Object> payload = StockSummaryBuilder.buildPackage(bars, 10);
@@ -35,11 +37,24 @@ class StockSummaryBuilderTest {
         Map<String, Object> latest = (Map<String, Object>) payload.get("latest");
         assertEquals(105f, (Float) latest.get("close"), 0.001f);
         assertEquals(55f, (Float) latest.get("rsi14"), 0.001f);
+        assertEquals(1_250_000L, latest.get("volume"));
+        assertEquals(1_000_000.0, (Double) latest.get("vol20"), 0.001);
+        assertEquals(25f, (Float) latest.get("volumeVsVol20Pct"), 0.001f);
         assertTrue(latest.containsKey("return5dPct"));
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> payloadBars = (List<Map<String, Object>>) payload.get("bars");
         assertEquals(55f, (Float) payloadBars.getLast().get("rsi14"), 0.001f);
+        assertEquals(1_250_000L, payloadBars.getLast().get("volume"));
+        assertEquals(25f, (Float) payloadBars.getLast().get("volumeVsVol20Pct"), 0.001f);
+    }
+
+    @Test
+    void volumeVsVol20PctIsNullWhenInputsMissing() {
+        assertEquals(null, StockSummaryBuilder.volumeVsVol20Pct(null, 1_000_000.0));
+        assertEquals(null, StockSummaryBuilder.volumeVsVol20Pct(1_000_000L, null));
+        assertEquals(null, StockSummaryBuilder.volumeVsVol20Pct(1_000_000L, 0.0));
+        assertEquals(-50f, StockSummaryBuilder.volumeVsVol20Pct(500_000L, 1_000_000.0), 0.001f);
     }
 
     @Test

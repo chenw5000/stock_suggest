@@ -33,13 +33,13 @@ public final class StockRepository {
 
     private static final String INSERT = """
             INSERT INTO stock (
-                ticker, "date", open, high, low, close,
+                ticker, "date", open, high, low, close, volume, vol20,
                 ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private static final String SELECT_RECENT = """
-            SELECT ticker, "date", open, high, low, close,
+            SELECT ticker, "date", open, high, low, close, volume, vol20,
                    ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
             FROM stock
             WHERE ticker = ?
@@ -48,7 +48,7 @@ public final class StockRepository {
             """;
 
     private static final String SELECT_ALL_BARS = """
-            SELECT ticker, "date", open, high, low, close,
+            SELECT ticker, "date", open, high, low, close, volume, vol20,
                    ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
             FROM stock
             WHERE ticker = ? AND close IS NOT NULL
@@ -56,7 +56,7 @@ public final class StockRepository {
             """;
 
     private static final String SELECT_BARS_ENDING_ON = """
-            SELECT ticker, "date", open, high, low, close,
+            SELECT ticker, "date", open, high, low, close, volume, vol20,
                    ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
             FROM stock
             WHERE ticker = ? AND "date" <= ?
@@ -72,7 +72,7 @@ public final class StockRepository {
             """;
 
     private static final String SELECT_BARS_IN_RANGE = """
-            SELECT ticker, "date", open, high, low, close,
+            SELECT ticker, "date", open, high, low, close, volume, vol20,
                    ma5, ma10, ma20, ma50, ma200, rsi14, chandeMmt, chalkinMF
             FROM stock
             WHERE ticker = ? AND "date" >= ? AND "date" <= ?
@@ -235,6 +235,13 @@ public final class StockRepository {
             WHERE ticker = ? AND "date" = ?
             """;
 
+    private static final String UPDATE_VOLUME_VOL20 = """
+            UPDATE stock
+            SET volume = ?,
+                vol20 = ?
+            WHERE ticker = ? AND "date" = ?
+            """;
+
     private final Connection connection;
 
     public StockRepository(Database database) {
@@ -282,14 +289,16 @@ public final class StockRepository {
                     setFloat(insert, 4, row.high());
                     setFloat(insert, 5, row.low());
                     setFloat(insert, 6, row.close());
-                    setFloat(insert, 7, row.ma5());
-                    setFloat(insert, 8, row.ma10());
-                    setFloat(insert, 9, row.ma20());
-                    setFloat(insert, 10, row.ma50());
-                    setFloat(insert, 11, row.ma200());
-                    setFloat(insert, 12, row.rsi14());
-                    setFloat(insert, 13, row.chandeMmt());
-                    setFloat(insert, 14, row.chalkinMF());
+                    setLong(insert, 7, row.volume());
+                    setDouble(insert, 8, row.vol20());
+                    setFloat(insert, 9, row.ma5());
+                    setFloat(insert, 10, row.ma10());
+                    setFloat(insert, 11, row.ma20());
+                    setFloat(insert, 12, row.ma50());
+                    setFloat(insert, 13, row.ma200());
+                    setFloat(insert, 14, row.rsi14());
+                    setFloat(insert, 15, row.chandeMmt());
+                    setFloat(insert, 16, row.chalkinMF());
                     insert.addBatch();
                     inserted++;
                 }
@@ -350,6 +359,49 @@ public final class StockRepository {
         }
         return rows;
     }
+
+    /**
+     * Updates only {@code volume} and {@code vol20} for the supplied dates. Other columns
+     * (OHLC, indicators, suggestions) are left unchanged. Null volume / vol20 clears those fields.
+     */
+    public int updateVolumeAndVol20(String ticker, Map<LocalDate, VolumeUpdate> valuesByDate)
+            throws SQLException {
+        if (valuesByDate == null || valuesByDate.isEmpty()) {
+            return 0;
+        }
+
+        boolean previous = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        try (PreparedStatement update = connection.prepareStatement(UPDATE_VOLUME_VOL20)) {
+            String symbol = ticker.toUpperCase();
+            for (Map.Entry<LocalDate, VolumeUpdate> entry : valuesByDate.entrySet()) {
+                VolumeUpdate values = entry.getValue() == null
+                        ? new VolumeUpdate(null, null)
+                        : entry.getValue();
+                setLong(update, 1, values.volume());
+                setDouble(update, 2, values.vol20());
+                update.setString(3, symbol);
+                update.setString(4, entry.getKey().toString());
+                update.addBatch();
+            }
+            int updated = 0;
+            for (int count : update.executeBatch()) {
+                if (count > 0 || count == Statement.SUCCESS_NO_INFO) {
+                    updated++;
+                }
+            }
+            connection.commit();
+            return updated;
+        } catch (SQLException e) {
+            connection.rollback();
+            throw e;
+        } finally {
+            connection.setAutoCommit(previous);
+        }
+    }
+
+    /** Volume fields written by {@link #updateVolumeAndVol20}. */
+    public record VolumeUpdate(Long volume, Double vol20) {}
 
     /**
      * Updates only {@code rsi14} for the supplied dates. A null value clears RSI for warm-up rows.
@@ -510,7 +562,9 @@ public final class StockRepository {
                 getFloat(rs, "ma200"),
                 getFloat(rs, "rsi14"),
                 getFloat(rs, "chandeMmt"),
-                getFloat(rs, "chalkinMF"));
+                getFloat(rs, "chalkinMF"),
+                getLong(rs, "volume"),
+                getDouble(rs, "vol20"));
     }
 
     /** All tickers for a single trading date, ordered by ticker (legacy stock columns). */
@@ -820,6 +874,32 @@ public final class StockRepository {
             ps.setNull(index, Types.FLOAT);
         } else {
             ps.setFloat(index, value);
+        }
+    }
+
+    private static Long getLong(ResultSet rs, String column) throws SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static void setLong(PreparedStatement ps, int index, Long value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.BIGINT);
+        } else {
+            ps.setLong(index, value);
+        }
+    }
+
+    private static Double getDouble(ResultSet rs, String column) throws SQLException {
+        double value = rs.getDouble(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static void setDouble(PreparedStatement ps, int index, Double value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.DOUBLE);
+        } else {
+            ps.setDouble(index, value);
         }
     }
 

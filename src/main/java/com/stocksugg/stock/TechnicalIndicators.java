@@ -4,13 +4,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Computes moving averages, Wilder RSI (14), Chande Momentum (14), and Chaikin Money Flow (20).
+ * Computes moving averages, Wilder RSI (14), Chande Momentum (14), Chaikin Money Flow (20),
+ * and the 20-day average volume ({@code vol20}).
  */
 public final class TechnicalIndicators {
 
     public static final int RSI_PERIOD = 14;
     public static final int CHANDE_PERIOD = 14;
     public static final int CHAIKIN_PERIOD = 20;
+    public static final int VOL20_PERIOD = 20;
 
     private TechnicalIndicators() {}
 
@@ -20,12 +22,14 @@ public final class TechnicalIndicators {
         double[] high = new double[n];
         double[] low = new double[n];
         long[] volume = new long[n];
+        double[] volumeAsDouble = new double[n];
         for (int i = 0; i < n; i++) {
             StockBar bar = bars.get(i);
             close[i] = bar.close();
             high[i] = bar.high();
             low[i] = bar.low();
             volume[i] = bar.volume();
+            volumeAsDouble[i] = bar.volume();
         }
 
         Float[] ma5 = sma(close, 5);
@@ -36,6 +40,7 @@ public final class TechnicalIndicators {
         Float[] rsi14 = relativeStrengthIndex(close, RSI_PERIOD);
         Float[] cmo = chandeMomentum(close, CHANDE_PERIOD);
         Float[] cmf = chaikinMoneyFlow(high, low, close, volume, CHAIKIN_PERIOD);
+        Double[] vol20 = smaDouble(volumeAsDouble, VOL20_PERIOD);
 
         List<StockRow> rows = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
@@ -54,7 +59,9 @@ public final class TechnicalIndicators {
                     ma200[i],
                     rsi14[i],
                     cmo[i],
-                    cmf[i]));
+                    cmf[i],
+                    bar.volume(),
+                    vol20[i]));
         }
         return rows;
     }
@@ -72,6 +79,25 @@ public final class TechnicalIndicators {
             }
             if (i >= period - 1) {
                 out[i] = (float) (sum / period);
+            }
+        }
+        return out;
+    }
+
+    /** Same windowed average as {@link #sma} but kept as {@code Double} for large volumes. */
+    static Double[] smaDouble(double[] values, int period) {
+        Double[] out = new Double[values.length];
+        if (values.length < period) {
+            return out;
+        }
+        double sum = 0;
+        for (int i = 0; i < values.length; i++) {
+            sum += values[i];
+            if (i >= period) {
+                sum -= values[i - period];
+            }
+            if (i >= period - 1) {
+                out[i] = sum / period;
             }
         }
         return out;

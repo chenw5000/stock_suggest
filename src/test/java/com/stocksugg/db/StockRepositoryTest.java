@@ -64,8 +64,20 @@ class StockRepositoryTest {
             assertNull(updatedRows.getFirst().rsi14());
             assertEquals(71f, updatedRows.getLast().rsi14(), 0.001f);
 
+            Map<LocalDate, StockRepository.VolumeUpdate> volumes = new LinkedHashMap<>();
+            volumes.put(LocalDate.parse("2026-07-15"),
+                    new StockRepository.VolumeUpdate(1_500_000L, 1_200_000.0));
+            volumes.put(LocalDate.parse("2026-07-16"),
+                    new StockRepository.VolumeUpdate(2_000_000L, 1_350_000.0));
+            assertEquals(2, repository.updateVolumeAndVol20("AAPL", volumes));
+            List<StockRow> withVolume = repository.findAllBars("AAPL");
+            assertEquals(1_500_000L, withVolume.getFirst().volume());
+            assertEquals(1_200_000.0, withVolume.getFirst().vol20(), 0.001);
+            assertEquals(2_000_000L, withVolume.getLast().volume());
+            assertEquals(1_350_000.0, withVolume.getLast().vol20(), 0.001);
+
             try (ResultSet rs = stmt.executeQuery("""
-                    SELECT close, thesis, risks, suggestedAction
+                    SELECT close, thesis, risks, suggestedAction, volume, vol20
                     FROM stock
                     WHERE ticker = 'AAPL' AND "date" = '2026-07-15'
                     """)) {
@@ -74,6 +86,8 @@ class StockRepositoryTest {
                 assertEquals("keep thesis", rs.getString("thesis"));
                 assertEquals("keep risks", rs.getString("risks"));
                 assertEquals("BUY", rs.getString("suggestedAction"));
+                assertEquals(1_500_000L, rs.getLong("volume"));
+                assertEquals(1_200_000.0, rs.getDouble("vol20"), 0.001);
             }
         }
     }
